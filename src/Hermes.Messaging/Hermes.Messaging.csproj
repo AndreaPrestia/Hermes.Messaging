@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>Hermes.Messaging</PackageId>
+    <Version>0.1.0-alpha</Version>
+    <Authors>CloudDine</Authors>
+    <Description>In-process message bus built on System.Threading.Channels with LiteDB persistence, automatic retry, circuit breaking, dead letter queues, and OpenTelemetry-compatible metrics.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>messagebus;channels;messaging;in-process;litedb;retry;circuit-breaker;dead-letter-queue</PackageTags>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hermes.Messaging.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LiteDB" Version="5.0.21" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.5" />
+  </ItemGroup>
+
+</Project>
