@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <PackageId>Hermes.Messaging</PackageId>
     <Version>0.1.0-alpha</Version>
-    <Authors>CloudDine</Authors>
+    <Authors>Andrea Prestia</Authors>
     <Description>In-process message bus built on System.Threading.Channels with LiteDB persistence, automatic retry, circuit breaking, dead letter queues, and OpenTelemetry-compatible metrics.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>messagebus;channels;messaging;in-process;litedb;retry;circuit-breaker;dead-letter-queue</PackageTags>
