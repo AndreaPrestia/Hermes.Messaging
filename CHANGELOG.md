@@ -7,7 +7,17 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.2.0-alpha]
 
-Durability and correctness hardening across HERMES-001 … HERMES-006.
+Durability and correctness hardening across HERMES-001 … HERMES-007.
+
+### Bounded reconciliation (HERMES-007)
+- Added `IMessageStore<T>.GetDueMessageIds(now, limit)` — enforces the limit at the query level and
+  projects `MessageId` only (no payloads). `limit <= 0` throws `ArgumentOutOfRangeException`.
+- Reconciliation and startup seeding now request only as many due IDs as the wake-up channel can
+  currently accept (`WakeupCapacity - outstanding`), instead of materializing the entire due backlog.
+- No semantic changes; the durable store remains the source of truth and missed signals are still
+  recovered. Added store, reconciliation, large-backlog (6k), and replay retry-budget tests.
+- Docs: fixed the stale "Retry & Circuit Breaker" README TOC entry and added a bounded-reconciliation
+  note to the README/SDD architecture.
 
 ### Hardening review (HERMES-006)
 - **P1** Publishing is rejected until startup recovery completes; recovery runs synchronously during

@@ -33,6 +33,14 @@ Workers consume MessageIds and atomically `TryClaim`.
 
 Duplicate signals must be harmless.
 
+> **Bounded reconciliation (HERMES-007).** Before: reconciliation could materialize the entire due
+> backlog (`GetDueMessages` loaded every due `PersistedMessage<T>`, payloads included). After:
+> reconciliation queries only a bounded number of due `MessageId`s based on the currently available
+> wake-up capacity (`GetDueMessageIds(now, limit)` — limit enforced at the query level, IDs only).
+> Startup seeding uses the same bounded query. This reduces avoidable allocations and store scans
+> for large backlogs (not a benchmarked speedup); the durable store remains authoritative and any
+> work not signalled this cycle is recovered by a later reconciliation.
+
 Recommended state machine:
 ```text
 Pending -> Processing -> Completed

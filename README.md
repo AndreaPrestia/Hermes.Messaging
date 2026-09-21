@@ -16,7 +16,7 @@ An **in-process, single-process** durable message bus for .NET built on `System.
 - [Subscribing to Messages](#subscribing-to-messages)
 - [Configuration](#configuration)
 - [Message Lifecycle](#message-lifecycle)
-- [Retry & Circuit Breaker](#retry--circuit-breaker)
+- [Retry Semantics](#retry-semantics)
 - [Dead Letter Queue](#dead-letter-queue)
 - [Diagnostics & Monitoring](#diagnostics--monitoring)
 - [Project Structure](#project-structure)
@@ -54,6 +54,7 @@ Channel<ChannelMessage<T>>  ············► │  reconciliation loop
 - **Durable DLQ** managed via `IDeadLetterAdministration<T>` (inspection is non-destructive; replay/delete/purge are explicit). The observer hook cannot delete the durable record.
 - **Explicit lifecycle** — publishing is allowed only in `Ready`; shutdown rejects new publishes first, drains in-flight up to a grace period, and leaves the backlog durable for restart.
 - **Fixed worker loops** — no per-message `Task.Run`.
+- **Bounded reconciliation** — reconciliation (and startup seeding) queries only a bounded number of due `MessageId`s based on the currently available wake-up capacity, rather than materializing the entire due backlog. This reduces avoidable allocations and store scans for large backlogs; the durable store remains the source of truth and any work not signalled this cycle is picked up by a later reconciliation as workers make progress.
 
 ### Observability
 

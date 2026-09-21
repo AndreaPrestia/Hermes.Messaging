@@ -1,5 +1,11 @@
 # 01 — Current State
 
+> **Bounded reconciliation (HERMES-007 implemented).** Reconciliation and startup seeding now query
+> only a bounded number of due `MessageId`s (`GetDueMessageIds(now, limit)`, limit enforced at the
+> query level, IDs only) sized to the available wake-up capacity, instead of materializing the whole
+> due backlog. Large backlogs are processed in bounded refill batches. No delivery/lifecycle/DLQ
+> semantics changed.
+>
 > **Hardening update (HERMES-006 implemented).** Post-implementation review fixes: publish is
 > gated on startup-recovery completion (readiness matches publishability); the reconciliation
 > wake-up layer is bounded and de-duplicated; all runtime components use `IMessageStore<T>` (no
