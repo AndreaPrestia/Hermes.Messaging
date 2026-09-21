@@ -42,36 +42,85 @@ dotnet run -c Release --project benchmarks/Hermes.Messaging.Benchmarks -- --back
 
 ## Measured facts
 
-### 1. Durable publish (`PublishAsync`)
+> **Methodology note (0.3.0-alpha cleanup).** The publish, end-to-end and backlog measurements
+> below were **re-run** after fixing two benchmark-harness defects (they do not reflect any change
+> to Hermes itself):
+> 1. **Publish** now creates a fresh store per BenchmarkDotNet iteration (`[IterationSetup]`), so the
+>    LiteDB file no longer grows across the whole run. The pre-cleanup publish numbers were inflated
+>    because they measured a store that accumulated every prior publish. This forces
+>    `InvocationCount=1, UnrollFactor=1`.
+> 2. **End-to-end / backlog** now wait for **durable** completion (store backlog =
+>    `Pending + Processing + RetryScheduled` reaches 0), not for the handler callback to return. A
+>    handler returning does not mean the record is durably `Completed`.
+>
+> The historical pre-cleanup numbers are preserved further below, clearly labelled as historical.
 
-Validation → LiteDB durable insert → best-effort signal → `PublishResult`. A no-op handler drains
-the channel during the run.
+### 1. Durable publish (`PublishAsync`) — re-run
 
-| PayloadBytes | Mean | Gen0 | Gen1 | Gen2 | Allocated |
-|-------------:|-----:|-----:|-----:|-----:|----------:|
-| 100 | 628.0 µs | 10.7422 | 2.9297 | 0.9766 | 600.83 KB |
-| 1024 | 693.2 µs | 11.7188 | 1.9531 | 0.9766 | 621.99 KB |
-| 10240 | 722.3 µs | 9.7656 | 1.9531 | – | 668.78 KB |
+Validation → LiteDB durable insert → best-effort signal → `PublishResult`. Fresh store per
+iteration (`InvocationCount=1, UnrollFactor=1`); a no-op handler only drains the wake-up channel.
 
-### 2. End-to-end processing (Publish → Persist → Signal → Claim → Handler → Completed)
+| PayloadBytes | Mean | StdDev | Allocated |
+|-------------:|-----:|-------:|----------:|
+| 100 | 299.6 µs | 47.55 µs | 52.92 KB |
+| 1024 | 290.9 µs | 51.11 µs | 43.11 KB |
+| 10240 | 313.8 µs | 60.03 µs | 53.23 KB |
 
-Per-message figures (`OperationsPerInvoke = 1000`), minimal handler.
+*Measured fact:* per-publish allocation is ~43–53 KB and mean latency ~290–314 µs, roughly flat
+across payload size in this range. *Interpretation (not a guarantee):* the ~10× higher allocation
+in the pre-cleanup numbers was a harness artifact of the ever-growing store, not the publish path.
+Absolute values are dominated by LiteDB fsync and vary by disk; the run-to-run variance
+(bimodal, high StdDev) comes from per-iteration host startup.
 
-| MaxConcurrency | Mean / msg | Allocated / msg |
-|---------------:|-----------:|----------------:|
-| 1 | 512.4 µs | 256.34 KB |
-| 4 | 543.2 µs | 254.22 KB |
-| 16 | 520.9 µs | 256.34 KB |
+### 2. End-to-end processing (Publish → Persist → Signal → Claim → Handler → durable Completed) — re-run
 
-### 3. Backlog recovery / reconciliation (single-shot probe)
+Per-message figures (`OperationsPerInvoke = 1000`), minimal handler, fresh host/store per
+iteration, waiting for durable backlog = 0.
 
-Pre-seeded durable `Pending` backlog; `MaxConcurrency = 4`.
+| MaxConcurrency | Mean / msg | Median / msg | Allocated / msg |
+|---------------:|-----------:|-------------:|----------------:|
+| 1 | 538.1 µs | 529.1 µs | 277.27 KB |
+| 4 | 516.4 µs | 510.2 µs | 263.76 KB |
+| 16 | 539.6 µs | 526.3 µs | 272.69 KB |
+
+*Measured fact:* ~510–540 µs and ~264–277 KB per message end-to-end; increasing `MaxConcurrency`
+does not materially improve per-message time here. *Interpretation:* the workload is dominated by
+per-message LiteDB writes (insert + claim + complete), which serialize on the single store file, so
+extra worker concurrency has little headroom on this synthetic no-op handler.
+
+### 3. Backlog recovery / reconciliation (single-shot probe) — re-run
+
+Pre-seeded durable `Pending` backlog; `MaxConcurrency = 4`. `drain_ms` now measures the time for the
+**durable backlog to reach 0**, not the last handler invocation.
 
 | Backlog | Seed time | Time-to-first-message | Drain time | Drain rate |
 |--------:|----------:|----------------------:|-----------:|-----------:|
-| 1,000 | 454 ms | 209 ms | 860 ms | ~1,162 msg/s |
-| 10,000 | 2,561 ms | 75 ms | 3,959 ms | ~2,526 msg/s |
-| 50,000 | 10,461 ms | 116 ms | 20,240 ms | ~2,470 msg/s |
+| 1,000 | 480 ms | 170 ms | 1,012 ms | ~987 msg/s |
+| 10,000 | 2,540 ms | 75 ms | 5,091 ms | ~1,964 msg/s |
+| 50,000 | 13,721 ms | 291 ms | 27,844 ms | ~1,796 msg/s |
+
+*Measured fact:* drain to a fully durable-`Completed` backlog is slower than the pre-cleanup
+handler-countdown figures (e.g. 50k: ~27.8 s vs the old ~20.2 s). *Interpretation:* the difference is
+the trailing `MarkCompleted` commits that the old probe stopped short of; the new numbers are the
+faithful cost of durable drain. Sub-linear rate degradation at larger backlogs is expected as the
+store file grows.
+
+### Historical (pre-cleanup, superseded — do NOT compare directly)
+
+Kept for provenance only. These were produced by the defective harness described in the methodology
+note above and must not be used as a baseline.
+
+| Bench | Result (historical) |
+|-------|---------------------|
+| Publish 100 B | 628.0 µs / 600.83 KB |
+| Publish 1 KB | 693.2 µs / 621.99 KB |
+| Publish 10 KB | 722.3 µs / 668.78 KB |
+| E2E MC=1 | 512.4 µs / 256.34 KB |
+| E2E MC=4 | 543.2 µs / 254.22 KB |
+| E2E MC=16 | 520.9 µs / 256.34 KB |
+| Backlog 1k drain | 860 ms (~1,162 msg/s) |
+| Backlog 10k drain | 3,959 ms (~2,526 msg/s) |
+| Backlog 50k drain | 20,240 ms (~2,470 msg/s) |
 
 ### 4. Message-type scaling (host startup vs number of registered types)
 

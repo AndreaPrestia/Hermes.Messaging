@@ -67,6 +67,8 @@ change and is a breaking API change best done as its own step.
 
 | Type | Why public today | Target |
 |------|------------------|--------|
+| `ChannelRouteRegistration<T>` | DI-time wiring; ctor parameter of the public subscriber. | `internal` (with the subscriber). |
+| `HermesStoreMetrics` | Telemetry gauge registry; ctor parameter of the public subscriber. | `internal` (with the subscriber). |
 | `PersistentMessageStore<T>` | Registered as concrete singleton; tests resolve it directly. | `internal` (expose only via `IMessageStore<T>`/diagnostics). |
 | `IMessageStore<T>` | Storage abstraction; only one production impl. | Keep public **only if** a pluggable store is a goal; otherwise internalize. Currently NEEDS-DESIGN. |
 | `ChannelRegistry` | Wake-up channel pool. | `internal`. |
@@ -82,8 +84,12 @@ change and is a breaking API change best done as its own step.
 
 ### Already internal (correct)
 
-`ChannelMetrics`, `TypeIdentity`, `HermesLifecycle`, `MessageBusDiagnostics` (impl), and now
-`ChannelRouteRegistration<T>`, `HermesStoreMetrics`.
+`ChannelMetrics`, `TypeIdentity`, `HermesLifecycle`, `MessageBusDiagnostics` (impl).
+
+> Note: `ChannelRouteRegistration<T>` and `HermesStoreMetrics` are **still `public`** (see the
+> INTERNALIZE-BEFORE-BETA table above). They are coupled to the public
+> `PersistentChannelRouterSubscriber<T>` constructor, so they can only be internalized as part of
+> the coordinated pre-beta breaking change — they were **not** internalized in the 0.3.0-alpha pass.
 
 ## Recommendation
 

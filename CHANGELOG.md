@@ -42,7 +42,35 @@ is unchanged.
 ### Notes
 - **License/authors metadata discrepancy** surfaced: `LICENSE` copyright holder is `Kakama`, while
   the NuGet `<Authors>` is `Andrea Prestia`. Both declare MIT. Ownership attribution was **not**
-  changed — flagged for the maintainer to reconcile.
+  changed — this **requires a maintainer decision before public package release** and is
+  intentionally left as-is for now.
+
+### Cleanup pass (post-maturity review)
+
+Corrections found reviewing the maturity pass. No messaging-architecture or delivery-semantics
+changes.
+
+- **Benchmark harness fixes (no Hermes behavior change):**
+  - Publish benchmark now uses per-iteration store isolation so the LiteDB file no longer grows
+    across the run (the old figures over-reported latency and ~10× the allocation).
+  - End-to-end and backlog benchmarks/probe now wait for **durable** completion (store backlog = 0),
+    not for the handler callback to return.
+  - `docs/performance/benchmark-baseline.md` re-run and updated; superseded numbers retained as
+    clearly-labelled historical data.
+- **Store schema guard hardening:**
+  - Schema-compatibility validation now runs **before** any index mutation, so an older build never
+    modifies a newer-schema store before refusing it.
+  - Schema version is recorded in a small O(1) `hermes_meta` document, avoiding a full-collection
+    scan on every open for large stores (legacy stores without the document validate once via
+    records, then upgrade). Newer/unknown schema is still never treated as compatible.
+- **Packaging / CI:**
+  - Package version is derived from the single `<Version>` in `Hermes.Messaging.csproj` (CI + smoke
+    test) — no duplicated version literals.
+  - CI adds a SourceLink / package-metadata verification step (SDK-provided SourceLink; validates a
+    portable PDB with a Source Link document map pointing at the repository + commit).
+- **API review doc fix:** corrected a false claim that `ChannelRouteRegistration<T>` and
+  `HermesStoreMetrics` were already internal — they remain **public** and are listed under the
+  coordinated pre-beta internalization group (not internalized in this pass).
 
 ## [0.2.0-alpha] — 2026-09-21
 
