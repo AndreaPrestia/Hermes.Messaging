@@ -36,12 +36,43 @@ jobs:
       - name: Test
         run: dotnet test Hermes.Messaging.slnx -c Release --no-build --verbosity normal
 
+      # Derive the package version from the library project itself so the version lives in exactly
+      # ONE place (<Version> in Hermes.Messaging.csproj). Bumping that property is sufficient — the
+      # pack output, the smoke test, and the SourceLink check all follow automatically.
+      - name: Derive package version
+        id: version
+        run: |
+          VERSION=$(dotnet msbuild src/Hermes.Messaging/Hermes.Messaging.csproj -getProperty:Version)
+          echo "Resolved package version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       # Verify the NuGet package can be produced.
       - name: Pack
         run: dotnet pack src/Hermes.Messaging/Hermes.Messaging.csproj -c Release -o artifacts
 
+      # Validate that the packed symbols carry usable source/repo metadata for debugging: a
+      # deterministic build, an embedded/linked repository URL + commit, and a portable PDB with a
+      # Source Link document map. This is the guardrail for P7 (SourceLink is SDK-provided; no
+      # external package). It fails CI if the debug metadata a consumer needs is missing.
+      - name: Verify SourceLink / package metadata
+        run: |
+          dotnet tool install --global sourcelink
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          SYMBOLS=$(ls artifacts/*.snupkg | head -n1)
+          echo "Inspecting symbols package: $SYMBOLS"
+          WORK=$(mktemp -d)
+          unzip -o "$SYMBOLS" -d "$WORK" > /dev/null
+          PDB=$(find "$WORK" -name 'Hermes.Messaging.pdb' | head -n1)
+          test -n "$PDB" || { echo "No portable PDB found in symbols package"; exit 1; }
+          echo "Validating Source Link document map in $PDB"
+          sourcelink print-json "$PDB" | grep -q '"documents"' || { echo "PDB has no Source Link document map"; exit 1; }
+          sourcelink print-urls "$PDB" | grep -qi 'github.com/AndreaPrestia/Hermes.Messaging' \
+            || { echo "Source Link URLs do not point at the expected repository"; exit 1; }
+          echo "SourceLink / package metadata OK"
+
       # Restore + run the package smoke test against the freshly-packed local package. This proves
       # the shipped public API is sufficient for a real consumer (project-reference tests can hide
       # accidentally-unexposed APIs). The smoke test project is intentionally outside the solution.
+      # The version is the one derived above — no hardcoded literal.
       - name: Package smoke test
-        run: dotnet run -c Release --project tests/Hermes.Messaging.PackageSmokeTest/Hermes.Messaging.PackageSmokeTest.csproj -p:HermesPackageVersion=0.3.0-alpha
+        run: dotnet run -c Release --project tests/Hermes.Messaging.PackageSmokeTest/Hermes.Messaging.PackageSmokeTest.csproj -p:HermesPackageVersion=${{ steps.version.outputs.version }}

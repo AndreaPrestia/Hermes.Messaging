@@ -9,10 +9,16 @@
     <!--
       This project intentionally references the PACKAGED Hermes.Messaging (from the local
       artifacts feed), NOT the source project. It proves the shipped NuGet package exposes exactly
-      the public API a real consumer uses. The version is provided by CI via -p:HermesPackageVersion,
-      defaulting to the current dev version.
+      the public API a real consumer uses.
+
+      The version is NOT hardcoded here. CI derives it from the single source of truth
+      (<Version> in src/Hermes.Messaging/Hermes.Messaging.csproj) and passes it via
+      -p:HermesPackageVersion. For manual local runs, read the same value dynamically off the
+      library project so a version bump requires editing exactly one file.
     -->
-    <HermesPackageVersion Condition="'$(HermesPackageVersion)' == ''">0.3.0-alpha</HermesPackageVersion>
+    <_HermesLibraryProject>$(MSBuildThisFileDirectory)..\..\src\Hermes.Messaging\Hermes.Messaging.csproj</_HermesLibraryProject>
+    <_HermesLibraryProjectText Condition="'$(HermesPackageVersion)' == ''">$([System.IO.File]::ReadAllText('$(_HermesLibraryProject)'))</_HermesLibraryProjectText>
+    <HermesPackageVersion Condition="'$(HermesPackageVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_HermesLibraryProjectText)', '&lt;Version&gt;([^&lt;]+)&lt;/Version&gt;').Groups[1].Value)</HermesPackageVersion>
     <!-- Not part of the solution build; packed/consumed explicitly in the smoke-test CI step. -->
     <ExcludeFromSolution>true</ExcludeFromSolution>
   </PropertyGroup>
