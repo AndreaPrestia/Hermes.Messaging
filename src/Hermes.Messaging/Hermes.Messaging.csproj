@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>Hermes.Messaging</PackageId>
-    <Version>0.4.1-alpha</Version>
+    <Version>0.4.2-alpha</Version>
     <Authors>Andrea Prestia</Authors>
     <Description>In-process, single-process durable message bus for .NET built on System.Threading.Channels with LiteDB persistence. Publish-before-signal durability, a durable state machine with crash recovery, persistent retry with jittered backoff, a durable dead-letter queue, explicit runtime lifecycle, and OpenTelemetry-compatible metrics and tracing (Hermes.Messaging).</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -5,6 +5,38 @@ changes are acceptable when required for correctness and are called out explicit
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.2-alpha] — 2026-09-21
+
+**Release / API baseline hygiene.** No runtime, delivery, persistence, retry, DLQ, reconciliation,
+lifecycle, or public-API-shape changes — documentation, CI, and analyzer-baseline bookkeeping only.
+
+### Changed
+- **PublicAPI baseline semantics corrected.** No analyzer-tracked release has shipped yet (the
+  `PublicApiAnalyzers` guard was introduced in the unpublished `0.4.1-alpha`; the only Git tag is
+  `v0.2.0-alpha`, which predates it). The entire current public API therefore now lives in
+  `src/Hermes.Messaging/PublicAPI.Unshipped.txt`, and `PublicAPI.Shipped.txt` contains only the
+  `#nullable enable` header — the conventional "first release pending" model. Nothing is pretended
+  to be historically shipped. (The compiled public surface is unchanged; only which baseline file
+  declares it moved.)
+- **CI GitHub Actions upgraded** to the Node.js-24 majors to clear the Node 20 deprecation warning:
+  `actions/checkout@v4 → @v5`, `actions/setup-dotnet@v4 → @v5`.
+- **`docs/api/public-api-review.md` rewritten** to describe the current `0.4.x` API as its main
+  body (single `Hermes.Messaging` namespace), with an added **API baseline workflow** section
+  (Shipped vs Unshipped, when entries move on release, how removals are recorded with `*REMOVED*`,
+  how to add API deliberately). Historical detail now lives in this changelog.
+
+### Notes
+- `Microsoft.CodeAnalysis.PublicApiAnalyzers` kept at `3.3.4` (stable, working, `PrivateAssets=all`
+  so it is not a consumer dependency) — no reason to change.
+- **Release blocker (unchanged):** public NuGet publication requires a maintainer decision confirming
+  that package authorship/copyright attribution is intentional — `LICENSE` reads
+  `Copyright (c) 2025 Kakama` while the NuGet `<Authors>` is `Andrea Prestia`. Neither value was
+  changed; this is a maintainer decision, not a legal determination made here.
+- NuGet.org publication status could not be verified from repository tooling in this task and is
+  therefore treated as "not verified" rather than assumed.
+
+Version bumped to `0.4.2-alpha`. Still alpha — the public API may change before `0.5.0-beta`.
+
 ## [0.4.1-alpha] — 2026-09-21
 
 **Final public-API design pass before the future `0.5.0-beta` API freeze.** No runtime, delivery,
