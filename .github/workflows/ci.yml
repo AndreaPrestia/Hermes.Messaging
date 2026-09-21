@@ -19,8 +19,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # Operate explicitly on the solution. The package smoke test is intentionally OUTSIDE the
+      # solution because it consumes the packed NuGet (which only exists after the Pack step); it
+      # is restored/run in its own step below.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore Hermes.Messaging.slnx
 
       # Build the whole solution in Release. This compiles every project, including the
       # crash harness (Hermes.Messaging.CrashHarness), which CrashRecoveryTests invokes as a
@@ -28,10 +31,10 @@ jobs:
       # be built here — the solution build guarantees that. The benchmark project is part of
       # the solution and is compiled here too, but benchmarks are NOT executed in CI.
       - name: Build
-        run: dotnet build -c Release --no-restore
+        run: dotnet build Hermes.Messaging.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test -c Release --no-build --verbosity normal
+        run: dotnet test Hermes.Messaging.slnx -c Release --no-build --verbosity normal
 
       # Verify the NuGet package can be produced.
       - name: Pack
