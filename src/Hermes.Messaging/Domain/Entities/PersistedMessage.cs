@@ -115,4 +115,22 @@ public sealed class PersistedMessage<T>
     /// Last error message if a processing attempt failed.
     /// </summary>
     public string? LastError { get; set; }
+
+    /// <summary>
+    /// Schema version of this persisted record. Enables forward migration and prevents
+    /// silently mishandling records written by an incompatible version.
+    /// </summary>
+    public int SchemaVersion { get; set; } = PersistedMessageSchema.CurrentVersion;
+}
+
+/// <summary>
+/// Versioning constants for the persisted message schema.
+/// </summary>
+public static class PersistedMessageSchema
+{
+    /// <summary>
+    /// Current persisted schema version.
+    /// v1: baseline (MessageId identity, state machine, retry, DLQ, schema version field).
+    /// </summary>
+    public const int CurrentVersion = 1;
 }

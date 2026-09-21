@@ -5,13 +5,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>Hermes.Messaging</PackageId>
-    <Version>0.1.0-alpha</Version>
+    <Version>0.2.0-alpha</Version>
     <Authors>Andrea Prestia</Authors>
-    <Description>In-process message bus built on System.Threading.Channels with LiteDB persistence, automatic retry, circuit breaking, dead letter queues, and OpenTelemetry-compatible metrics.</Description>
+    <Description>In-process, single-process durable message bus for .NET built on System.Threading.Channels with LiteDB persistence. Publish-before-signal durability, a durable state machine with crash recovery, persistent retry with jittered backoff, a durable dead-letter queue, explicit runtime lifecycle, and OpenTelemetry-compatible metrics and tracing (Hermes.Messaging).</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>messagebus;channels;messaging;in-process;litedb;retry;circuit-breaker;dead-letter-queue</PackageTags>
+    <PackageTags>messagebus;channels;messaging;in-process;durable;litedb;retry;dead-letter-queue;opentelemetry</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/AndreaPrestia/Hermes.Messaging</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Deterministic>true</Deterministic>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Hermes.Messaging.Tests" />

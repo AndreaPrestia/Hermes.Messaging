@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using Microsoft.Extensions.DependencyInjection;
 
 using Hermes.Messaging.Domain.Entities;
@@ -62,9 +64,27 @@ public sealed class InMemoryMessageBus : IMessageBus
         var messageId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var envelope = new ChannelMessage<T>(route, message, correlationId, messageId);
 
+        using var activity = HermesTelemetry.ActivitySource.StartActivity("Publish", ActivityKind.Producer);
+        activity?.SetTag("message_type", typeof(T).Name);
+        activity?.SetTag("route", route);
+
+        var startTs = Stopwatch.GetTimestamp();
+        HermesTelemetry.MessagesPublished.Add(1, HermesTelemetry.Tags(typeof(T), route));
+
         // 3. Persist Pending and commit. If this throws, nothing is Accepted.
         var store = _services.GetRequiredService<IMessageStore<T>>();
-        store.Insert(envelope);
+        try
+        {
+            store.Insert(envelope);
+        }
+        catch
+        {
+            HermesTelemetry.PublishFailed.Add(1, HermesTelemetry.Tags(typeof(T), route));
+            activity?.SetStatus(ActivityStatusCode.Error, "persist failed");
+            throw;
+        }
+
+        HermesTelemetry.MessagesPersisted.Add(1, HermesTelemetry.Tags(typeof(T), route));
 
         var acceptedAt = DateTimeOffset.UtcNow;
 
@@ -73,6 +93,8 @@ public sealed class InMemoryMessageBus : IMessageBus
         //    post-commit cancellation must NOT be surfaced. The message will be replayed from
         //    the durable store on restart if it is never dequeued.
         SignalBestEffort(envelope);
+
+        HermesTelemetry.PublishDuration.Record(Stopwatch.GetElapsedTime(startTs).TotalMilliseconds, HermesTelemetry.Tags(typeof(T), route));
 
         var result = new PublishResult
         {
@@ -93,12 +115,18 @@ public sealed class InMemoryMessageBus : IMessageBus
             {
                 ChannelMetrics.RecordEnqueued(typeof(T), envelope.Path);
             }
-            // If the bounded channel is full we deliberately do NOT block or fail:
-            // the durable record already exists and will be recovered.
+            else
+            {
+                // The bounded channel is full; we deliberately do NOT block or fail. The durable
+                // record already exists and the reconciliation loop will pick it up. Record the
+                // missed signal so operators can see acceleration-path saturation.
+                HermesTelemetry.SignalMissed.Add(1, HermesTelemetry.Tags(typeof(T), envelope.Path));
+            }
         }
         catch
         {
             // Signalling is only an acceleration mechanism; never fail an accepted publish.
+            HermesTelemetry.SignalMissed.Add(1, HermesTelemetry.Tags(typeof(T), envelope.Path));
         }
     }
 }

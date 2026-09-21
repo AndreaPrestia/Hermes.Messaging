@@ -57,7 +57,8 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             AttemptCount = 0,
             CreatedAt = _timeProvider.GetUtcNow(),
             UpdatedAt = _timeProvider.GetUtcNow(),
-            NextAttemptAt = null
+            NextAttemptAt = null,
+            SchemaVersion = PersistedMessageSchema.CurrentVersion
         };
 
         lock (_writeLock)

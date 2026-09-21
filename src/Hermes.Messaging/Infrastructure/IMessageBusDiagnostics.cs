@@ -7,9 +7,15 @@ namespace Hermes.Messaging.Infrastructure;
 public interface IMessageBusDiagnostics
 {
     /// <summary>
-    /// Returns true when the message bus is operational and can accept messages.
+    /// Liveness: true when the core bus is resolvable and the runtime has not faulted.
     /// </summary>
     bool IsHealthy { get; }
+
+    /// <summary>
+    /// Readiness: true only when the runtime is <see cref="RuntimeState.Ready"/>, the durable
+    /// store is initialized, and startup recovery has completed for all subscribers (SDD 09).
+    /// </summary>
+    bool IsReady { get; }
 
     /// <summary>
     /// Gets the current circuit breaker state for a specific message type and route.

@@ -22,6 +22,8 @@ public static class DependencyInjection
         services.TryAddSingleton<MessageBusOptions>();
         services.TryAddSingleton<IMessageBusDiagnostics, MessageBusDiagnostics>();
         services.TryAddSingleton<HermesRuntimeState>();
+        services.TryAddSingleton<HermesReadiness>();
+        services.TryAddSingleton<HermesStoreMetrics>();
         services.TryAddSingleton(TimeProvider.System);
 
         // Runtime lifecycle: flips Ready on start; Stopping on ApplicationStopping (before any

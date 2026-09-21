@@ -23,6 +23,8 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     private readonly CircuitBreaker _circuitBreaker;
     private readonly PersistentMessageStore<T> _messageStore;
     private readonly TimeProvider _timeProvider;
+    private readonly HermesReadiness? _readiness;
+    private readonly HermesStoreMetrics? _storeMetrics;
 
     private readonly int _maxRetryAttempts;
     private readonly TimeSpan _initialRetryDelay;
@@ -56,7 +58,9 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         PersistentMessageStore<T> messageStore,
         IEnumerable<ChannelRouteRegistration<T>> registrations,
         MessageBusOptions? options = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        HermesReadiness? readiness = null,
+        HermesStoreMetrics? storeMetrics = null)
     {
         ArgumentNullException.ThrowIfNull(routes);
         ArgumentNullException.ThrowIfNull(scopeFactory);
@@ -80,6 +84,11 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         _maxRetryDelay = TimeSpan.FromSeconds(30);
         _maxConcurrency = Math.Max(1, options?.MaxConcurrency ?? 1);
         _shutdownGracePeriod = options?.ShutdownGracePeriod ?? TimeSpan.FromSeconds(30);
+        _readiness = readiness;
+        _storeMetrics = storeMetrics;
+
+        _readiness?.Expect(typeof(T).Name);
+        _storeMetrics?.Register(typeof(T).Name, _messageStore.GetStats);
 
         _ = registrations.ToArray();
     }
@@ -97,6 +106,9 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         // Seed the wake-up channel with all currently due work (Pending + due retries).
         // This also covers signals that were lost before this process started.
         SignalDueWork();
+
+        // Startup recovery for this type is complete — contributes to overall readiness.
+        _readiness?.MarkRecovered(typeof(T).Name);
 
         // Start background loops with proper lifecycle.
         _cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -181,10 +193,19 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 
         var envelope = new ChannelMessage<T>(claimed.Path, claimed.Body, claimed.CorrelationId, claimed.MessageId);
 
+        using var activity = HermesTelemetry.ActivitySource.StartActivity("Process", ActivityKind.Consumer);
+        activity?.SetTag("message_type", typeof(T).Name);
+        activity?.SetTag("route", claimed.Path);
+
+        HermesTelemetry.ProcessingStarted.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path));
+        var startTs = Stopwatch.GetTimestamp();
+
         try
         {
             await DispatchOnceAsync(envelope, scope.ServiceProvider, stoppingToken).ConfigureAwait(false);
             _messageStore.MarkCompleted(claimed.MessageId);
+            HermesTelemetry.ProcessingSucceeded.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path, "completed"));
+            HermesTelemetry.ProcessingDuration.Record(Stopwatch.GetElapsedTime(startTs).TotalMilliseconds, HermesTelemetry.Tags(typeof(T), claimed.Path, "completed"));
         }
         catch (CircuitBreakerOpenException)
         {
@@ -240,6 +261,8 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         // NOT held by the delay — the reconciliation loop re-signals the message when due.
         var nextAttemptAt = _timeProvider.GetUtcNow() + ComputeBackoff(claimed.AttemptCount);
         ChannelMetrics.RecordRetry(typeof(T), claimed.Path);
+        HermesTelemetry.ProcessingFailed.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path, "retry_scheduled"));
+        HermesTelemetry.ProcessingRetried.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path));
         _logger?.LogWarning(ex, "Scheduling retry for path '{Path}', MessageId: {MessageId} (attempt {Attempt}/{MaxAttempts}) at {NextAttemptAt:o}",
             claimed.Path, claimed.MessageId, claimed.AttemptCount, _maxRetryAttempts, nextAttemptAt);
         _messageStore.ScheduleRetry(claimed.MessageId, nextAttemptAt, ex.Message);
@@ -250,6 +273,8 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         // Durable record FIRST — this is the source of truth and must never depend on the
         // volatile observer channel. The observer enqueue below is best-effort only.
         _messageStore.MarkDeadLettered(claimed.MessageId, ex.Message);
+        HermesTelemetry.ProcessingFailed.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path, "deadlettered"));
+        HermesTelemetry.ProcessingDeadLettered.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path));
 
         if (!_deadLetterQueue.TryEnqueue(claimed.Path, claimed.Body, ex, claimed.AttemptCount, claimed.CorrelationId))
         {

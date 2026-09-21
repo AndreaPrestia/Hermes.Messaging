@@ -1,8 +1,10 @@
 # Hermes.Messaging
 
-An in-process message bus built on `System.Threading.Channels` with persistent storage (LiteDB), automatic retry, circuit breaking, dead letter queues, and OpenTelemetry-compatible metrics.
+An **in-process, single-process** durable message bus for .NET built on `System.Threading.Channels` with persistent storage (LiteDB): a durable state machine with crash recovery, persistent retry with jittered backoff, a durable dead-letter queue, explicit runtime lifecycle, and OpenTelemetry-compatible metrics and tracing.
 
-> **Persistence is always enabled.** Every message is written to disk before processing and replayed automatically after a crash.
+> **Persist-before-signal durability.** `PublishAsync` returns an accepted `PublishResult` only after the message has been durably committed. The durable store is the source of truth; the in-memory channel is only a wake-up/acceleration signal — a lost signal never loses an accepted message.
+>
+> **Delivery semantics:** at-least-once within the single-process boundary. Duplicates are possible; this is **not** exactly-once. Not a distributed broker and not a multi-process/multi-node queue.
 
 ---
 
@@ -24,32 +26,42 @@ An in-process message bus built on `System.Threading.Channels` with persistent s
 ## Architecture Overview
 
 ```
-Publisher                         Subscriber (BackgroundService)
-   │                                       │
-   ▼                                       ▼
-IMessageBus.PublishAsync()     ┌─── PersistentChannelRouterSubscriber<T> ───┐
-   │                           │                                            │
-   ▼                           │  1. Persist to LiteDB (Pending)            │
-Channel<ChannelMessage<T>>  ──►│  2. Dispatch via ChannelRouteTable<T>      │
-   (bounded, backpressure)     │  3. Retry with exponential backoff         │
-                               │  4. Circuit breaker per route              │
-                               │  5. Mark Completed / DeadLettered          │
-                               └────────────────────────────────────────────┘
-                                       │ (on failure after all retries)
-                                       ▼
-                               DeadLetterQueue<T>
-                                       │
-                                       ▼
-                               DeadLetterQueueProcessor
-                               (dispatches to IDeadLetterHandler<T>)
+Publisher (only when runtime is Ready)         Subscriber (BackgroundService)
+   │                                                    │
+   ▼                                                    ▼
+IMessageBus.PublishAsync()                ┌─ PersistentChannelRouterSubscriber<T> ─┐
+   │ 1. validate route                    │  startup: RecoverInterrupted()          │
+   │ 2. Persist LiteDB (Pending)  ◄── source of truth   (Processing -> Pending)     │
+   │ 3. commit                            │  fixed worker loops:                    │
+   │ 4. best-effort signal ─────────────► │   - TryClaim (atomic) -> Processing     │
+   │ 5. return PublishResult (Accepted)   │   - dispatch once                       │
+   ▼                                      │   - Complete / ScheduleRetry / DeadLetter│
+Channel<ChannelMessage<T>>  ············► │  reconciliation loop re-signals due work │
+   (wake-up/acceleration only)           └──────────────────────────────────────────┘
+                                                    │ (on dead-letter)
+                                                    ▼
+                                          Durable DeadLettered state
+                                          (IDeadLetterAdministration<T>:
+                                           List/Get/Replay/Delete/Purge)
 ```
 
 **Key design decisions:**
 
-- **One channel per message type `T`** — bounded, with backpressure (`FullMode = Wait`).
-- **One `BackgroundService` per message type** — reads from the channel, persists, dispatches.
-- **Route-based dispatch** — a single channel can serve multiple routes (e.g., `"orders/created"`, `"orders/cancelled"`), each with its own handler.
-- **Crash recovery** — on startup, pending messages from the LiteDB store are replayed before the channel reader starts.
+- **Durable store is the source of truth.** The bounded channel is only a wake-up signal; a lost signal is recovered by the reconciliation loop.
+- **Atomic claim** (`TryClaim`) makes duplicate signals harmless — a message is processed by exactly one worker at a time.
+- **Durable state machine:** `Pending → Processing → Completed`, `Processing → RetryScheduled → Processing`, `Processing → DeadLettered`, explicit `DeadLettered → Pending` replay. Interrupted `Processing` is recovered to `Pending` on startup.
+- **Persistent retry** with bounded exponential backoff + jitter (`TimeProvider`); workers are never held by a retry delay.
+- **Durable DLQ** managed via `IDeadLetterAdministration<T>` (inspection is non-destructive; replay/delete/purge are explicit). The observer hook cannot delete the durable record.
+- **Explicit lifecycle** — publishing is allowed only in `Ready`; shutdown rejects new publishes first, drains in-flight up to a grace period, and leaves the backlog durable for restart.
+- **Fixed worker loops** — no per-message `Task.Run`.
+
+### Observability
+
+Metrics and traces use the stable name `Hermes.Messaging`:
+
+- **Metrics (Meter `Hermes.Messaging`):** counters `messages.published`, `messages.persisted`, `publish.failed`, `signal.missed`, `processing.started/succeeded/failed/retried/deadlettered`; histograms `publish.duration`, `processing.duration`; gauges `messages.pending`, `messages.processing`, `messages.retry_scheduled`, `deadletters.depth`. Tags are low-cardinality (`message_type`, `route`, `outcome`) — never MessageId/CorrelationId.
+- **Tracing (ActivitySource `Hermes.Messaging`):** `Publish` and `Process` spans.
+- **Health:** `IMessageBusDiagnostics.IsHealthy` (liveness) and `IsReady` (runtime `Ready` + startup recovery complete).
 
 ---
 

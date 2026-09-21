@@ -32,6 +32,16 @@
 > `ApplicationStopping`), then awaits in-flight handlers up to a configurable
 > `ShutdownGracePeriod`, leaving the durable backlog for restart. The concurrency and lifecycle
 > defects below are fixed.
+>
+> **Phase 5 update (HERMES-005 implemented).** Observability now describes durable state: a stable
+> `Hermes.Messaging` meter exposes durable counters/histograms and gauges (`messages.pending`,
+> `messages.processing`, `messages.retry_scheduled`, `deadletters.depth`), plus an `ActivitySource`
+> emitting `Publish`/`Process` spans; tags are low-cardinality only (no MessageId/CorrelationId).
+> Readiness (`IMessageBusDiagnostics.IsReady`) requires runtime `Ready` and completed startup
+> recovery; liveness (`IsHealthy`) requires a resolvable bus and a non-`Faulted` runtime. Persisted
+> records carry a `SchemaVersion`. Package metadata, README semantics, and a CHANGELOG were updated.
+> Remaining before 1.0: mass-internalization of infrastructure types and the circuit-breaker
+> removal/relocation are intentionally deferred (would be further breaking API changes).
 Audited publish flow (baseline, before HERMES-001):
 ```text
 PublishAsync

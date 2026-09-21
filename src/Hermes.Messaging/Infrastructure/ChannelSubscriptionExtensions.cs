@@ -97,6 +97,8 @@ public static class ChannelSubscriptionExtensions
         services.TryAddSingleton<ChannelRouteTable<T>>();
         services.TryAddSingleton<DeadLetterQueueRegistry>();
         services.TryAddSingleton<HermesRuntimeState>();
+        services.TryAddSingleton<HermesReadiness>();
+        services.TryAddSingleton<HermesStoreMetrics>();
         services.TryAddSingleton(TimeProvider.System);
 
         // Auto-register DeadLetterQueue<T> so the subscriber never fails at startup
