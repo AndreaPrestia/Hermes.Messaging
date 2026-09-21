@@ -18,15 +18,9 @@ public interface IMessageBusDiagnostics
     bool IsReady { get; }
 
     /// <summary>
-    /// Gets the current circuit breaker state for a specific message type and route.
-    /// </summary>
-    /// <typeparam name="T">Message payload type.</typeparam>
-    /// <param name="route">The route path.</param>
-    CircuitStateEnum GetCircuitState<T>(string route);
-
-    /// <summary>
-    /// Gets the approximate number of messages waiting to be processed across all routes
-    /// for a specific message type.
+    /// Gets the durable backlog for a message type: the number of messages that still require
+    /// work, defined as <c>Pending + Processing + RetryScheduled</c>. Dead-lettered messages are
+    /// NOT counted here. Returns 0 if the store is unavailable (e.g. no subscriptions).
     /// </summary>
     /// <typeparam name="T">Message payload type.</typeparam>
     int GetBacklogCount<T>();

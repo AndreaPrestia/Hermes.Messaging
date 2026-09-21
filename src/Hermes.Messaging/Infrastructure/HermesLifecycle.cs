@@ -33,6 +33,10 @@ internal sealed class HermesLifecycle : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        // The runtime lifecycle reaches Ready on host start. Publishability additionally requires
+        // startup recovery to be complete (tracked by HermesReadiness) — the two are combined in
+        // HermesRuntimeState.IsReady / EnsureReady and in the publish gate, so a publish can never
+        // be accepted before recovery completes even though the lifecycle is Ready (HERMES-006 P1).
         _state.TryTransition(RuntimeState.Created, RuntimeState.Starting);
 
         _appLifetime.ApplicationStopping.Register(() =>
@@ -44,7 +48,7 @@ internal sealed class HermesLifecycle : IHostedService
         _appLifetime.ApplicationStopped.Register(() => _state.Set(RuntimeState.Stopped));
 
         _state.Set(RuntimeState.Ready);
-        _logger?.LogInformation("Hermes runtime is Ready");
+        _logger?.LogInformation("Hermes runtime lifecycle is Ready (publishability also requires recovery completion)");
         return Task.CompletedTask;
     }
 

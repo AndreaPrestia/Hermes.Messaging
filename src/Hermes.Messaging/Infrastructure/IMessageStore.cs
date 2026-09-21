@@ -107,4 +107,15 @@ public interface IMessageStore<T>
     /// Deletes all dead-lettered messages. Returns the number removed.
     /// </summary>
     int PurgeDeadLetters();
+
+    /// <summary>
+    /// Returns durable-state statistics for this store (counts per status).
+    /// </summary>
+    MessageStoreStats GetStats();
+
+    /// <summary>
+    /// Removes old Completed messages per the retention policy. Dead-lettered messages are never
+    /// removed here. Returns the number deleted.
+    /// </summary>
+    int CleanupOldMessages();
 }

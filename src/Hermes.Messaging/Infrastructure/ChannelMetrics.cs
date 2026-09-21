@@ -4,9 +4,16 @@ using System.Diagnostics.Metrics;
 
 namespace Hermes.Messaging.Infrastructure;
 
+/// <summary>
+/// Volatile in-memory notification/dispatch metrics for the channel acceleration layer. These are
+/// NOT durable-state metrics — durable backlog is exposed via <see cref="HermesStoreMetrics"/> and
+/// <see cref="IMessageBusDiagnostics.GetBacklogCount{T}"/>. Instruments here describe the transient
+/// wake-up channel and per-dispatch outcomes only.
+/// </summary>
 internal static class ChannelMetrics
 {
-    private static readonly Meter Meter = new("Hermes.Messaging", "1.0.0");
+    // No hard-coded version — the meter inherits the assembly/package version at runtime.
+    private static readonly Meter Meter = new("Hermes.Messaging");
     private static readonly Counter<long> EnqueuedCounter = Meter.CreateCounter<long>("messagebus.enqueued");
     private static readonly Counter<long> DroppedCounter = Meter.CreateCounter<long>("messagebus.dropped");
     private static readonly Counter<long> DispatchedCounter = Meter.CreateCounter<long>("messagebus.dispatched");

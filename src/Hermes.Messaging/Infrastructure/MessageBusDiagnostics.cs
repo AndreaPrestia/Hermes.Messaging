@@ -7,23 +7,19 @@ namespace Hermes.Messaging.Infrastructure;
 /// </summary>
 internal sealed class MessageBusDiagnostics : IMessageBusDiagnostics
 {
-    private readonly CircuitBreaker _circuitBreaker;
     private readonly IServiceProvider _serviceProvider;
     private readonly HermesRuntimeState _runtimeState;
     private readonly HermesReadiness _readiness;
 
     public MessageBusDiagnostics(
-        CircuitBreaker circuitBreaker,
         IServiceProvider serviceProvider,
         HermesRuntimeState runtimeState,
         HermesReadiness readiness)
     {
-        ArgumentNullException.ThrowIfNull(circuitBreaker);
         ArgumentNullException.ThrowIfNull(serviceProvider);
         ArgumentNullException.ThrowIfNull(runtimeState);
         ArgumentNullException.ThrowIfNull(readiness);
 
-        _circuitBreaker = circuitBreaker;
         _serviceProvider = serviceProvider;
         _runtimeState = runtimeState;
         _readiness = readiness;
@@ -41,22 +37,23 @@ internal sealed class MessageBusDiagnostics : IMessageBusDiagnostics
 
     public bool IsReady => _runtimeState.IsReady && _readiness.RecoveryComplete;
 
-    public CircuitStateEnum GetCircuitState<T>(string route)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(route);
-
-        var circuitKey = typeof(T).Name + ":" + route;
-        return _circuitBreaker.GetState(circuitKey);
-    }
-
     public int GetBacklogCount<T>()
     {
-        return ChannelMetrics.GetBacklog(typeof(T));
+        // Durable backlog: work that still needs doing, from the store — NOT Channel enqueue/
+        // dequeue counters. Dead letters are excluded (they are terminal until explicit replay).
+        var store = _serviceProvider.GetService<IMessageStore<T>>();
+        if (store is null)
+        {
+            return 0;
+        }
+
+        var stats = store.GetStats();
+        return stats.PendingCount + stats.ProcessingCount + stats.RetryScheduledCount;
     }
 
     public MessageStoreStats? GetStoreStats<T>()
     {
-        var store = _serviceProvider.GetService<PersistentMessageStore<T>>();
+        var store = _serviceProvider.GetService<IMessageStore<T>>();
         return store?.GetStats();
     }
 }

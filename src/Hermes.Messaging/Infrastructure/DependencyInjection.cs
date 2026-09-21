@@ -17,7 +17,6 @@ public static class DependencyInjection
         // Register core singletons
         services.TryAddSingleton<ChannelRegistry>();
         services.TryAddSingleton<IMessageBus, InMemoryMessageBus>();
-        services.TryAddSingleton<CircuitBreaker>();
         services.TryAddSingleton<DeadLetterQueueRegistry>();
         services.TryAddSingleton<MessageBusOptions>();
         services.TryAddSingleton<IMessageBusDiagnostics, MessageBusDiagnostics>();
@@ -111,10 +110,23 @@ public sealed class MessageBusOptions
     public int DefaultChannelCapacity { get; set; } = 10_000;
 
     /// <summary>
-    /// Gets or sets the maximum retry attempts for failed messages.
-    /// Default is 3.
+    /// Gets or sets the maximum number of <b>total handler invocations</b> before a message is
+    /// dead-lettered — this includes the first attempt. For example, <c>MaxAttempts = 1</c>
+    /// dead-letters after the first failure (no retries); <c>MaxAttempts = 3</c> allows exactly
+    /// three handler invocations. Default is 3.
     /// </summary>
-    public int MaxRetryAttempts { get; set; } = 3;
+    public int MaxAttempts { get; set; } = 3;
+
+    /// <summary>
+    /// Obsolete alias for <see cref="MaxAttempts"/>. Same semantics (total handler invocations,
+    /// including the first). Retained temporarily for alpha compatibility.
+    /// </summary>
+    [Obsolete("Renamed to MaxAttempts (total handler invocations, including the first). Use MaxAttempts.")]
+    public int MaxRetryAttempts
+    {
+        get => MaxAttempts;
+        set => MaxAttempts = value;
+    }
 
     /// <summary>
     /// Gets or sets the initial retry delay in milliseconds.

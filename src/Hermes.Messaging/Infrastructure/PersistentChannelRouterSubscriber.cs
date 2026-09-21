@@ -20,28 +20,32 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PersistentChannelRouterSubscriber<T>>? _logger;
     private readonly DeadLetterQueue<T> _deadLetterQueue;
-    private readonly CircuitBreaker _circuitBreaker;
-    private readonly PersistentMessageStore<T> _messageStore;
+    private readonly IMessageStore<T> _messageStore;
     private readonly TimeProvider _timeProvider;
     private readonly HermesReadiness? _readiness;
     private readonly HermesStoreMetrics? _storeMetrics;
 
-    private readonly int _maxRetryAttempts;
+    private readonly int _maxAttempts;
     private readonly TimeSpan _initialRetryDelay;
     private readonly TimeSpan _maxRetryDelay;
     private readonly int _maxConcurrency;
     private readonly TimeSpan _shutdownGracePeriod;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromHours(1);
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(1);
-    private static readonly string CircuitKeyPrefix = typeof(T).Name + ":";
 
-    // Multiple fixed worker loops read from this channel concurrently, so SingleReader=false.
-    // Duplicate delivery of the same MessageId is harmless because TryClaim is atomic.
-    private readonly Channel<Guid> _wakeups = Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions
+    // Bounded wake-up notification with a dedup set (P2): the durable store remains the source of
+    // truth; this layer only accelerates. Capacity is bounded so a slow consumer cannot cause
+    // unbounded memory growth, and duplicate due-scans do not enqueue the same id repeatedly.
+    private const int WakeupCapacity = 4096;
+    private readonly Channel<Guid> _wakeups = Channel.CreateBounded<Guid>(new BoundedChannelOptions(WakeupCapacity)
     {
         SingleReader = false,
-        SingleWriter = false
+        SingleWriter = false,
+        // TryWrite returns false when full; we react by clearing the outstanding marker so the
+        // reconciliation loop can re-signal later. The durable store is authoritative.
+        FullMode = BoundedChannelFullMode.Wait
     });
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> _outstanding = new();
 
     private CancellationTokenSource? _cleanupCts;
     private Task? _cleanupTask;
@@ -54,8 +58,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         ChannelRegistry channelRegistry,
         ILogger<PersistentChannelRouterSubscriber<T>>? logger,
         DeadLetterQueue<T> deadLetterQueue,
-        CircuitBreaker circuitBreaker,
-        PersistentMessageStore<T> messageStore,
+        IMessageStore<T> messageStore,
         IEnumerable<ChannelRouteRegistration<T>> registrations,
         MessageBusOptions? options = null,
         TimeProvider? timeProvider = null,
@@ -67,7 +70,6 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         ArgumentNullException.ThrowIfNull(channelRegistry);
         ArgumentNullException.ThrowIfNull(registrations);
         ArgumentNullException.ThrowIfNull(deadLetterQueue);
-        ArgumentNullException.ThrowIfNull(circuitBreaker);
         ArgumentNullException.ThrowIfNull(messageStore);
 
         _reader = channelRegistry.GetOrCreate<T>().Reader;
@@ -75,11 +77,10 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         _scopeFactory = scopeFactory;
         _logger = logger;
         _deadLetterQueue = deadLetterQueue;
-        _circuitBreaker = circuitBreaker;
         _messageStore = messageStore;
         _timeProvider = timeProvider ?? TimeProvider.System;
 
-        _maxRetryAttempts = options?.MaxRetryAttempts ?? 3;
+        _maxAttempts = options?.MaxAttempts ?? 3;
         _initialRetryDelay = TimeSpan.FromMilliseconds(options?.InitialRetryDelayMs ?? 100);
         _maxRetryDelay = TimeSpan.FromSeconds(30);
         _maxConcurrency = Math.Max(1, options?.MaxConcurrency ?? 1);
@@ -87,30 +88,37 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         _readiness = readiness;
         _storeMetrics = storeMetrics;
 
-        _readiness?.Expect(typeof(T).Name);
-        _storeMetrics?.Register(typeof(T).Name, _messageStore.GetStats);
+        _readiness?.Expect(TypeIdentity.Key<T>());
+        _storeMetrics?.Register(TypeIdentity.Key<T>(), _messageStore.GetStats);
 
         _ = registrations.ToArray();
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public override Task StartAsync(CancellationToken cancellationToken)
     {
-        // Startup interrupted-recovery: any message left Processing (or the retired Failed
-        // state) by a previous crash is returned to Pending so it can be re-claimed.
+        // Perform startup recovery SYNCHRONOUSLY during host startup (awaited by the host),
+        // BEFORE the loop is running and before the runtime is marked Ready. This guarantees a
+        // publish cannot be accepted until recovery is complete (HERMES-006 P1).
         var recovered = _messageStore.RecoverInterrupted();
         if (recovered > 0)
         {
             _logger?.LogInformation("Recovered {Count} interrupted messages to Pending on startup", recovered);
         }
 
-        // Seed the wake-up channel with all currently due work (Pending + due retries).
-        // This also covers signals that were lost before this process started.
+        // Seed the wake-up channel with all currently due work (Pending + due retries),
+        // covering signals lost before this process started.
         SignalDueWork();
 
-        // Startup recovery for this type is complete — contributes to overall readiness.
-        _readiness?.MarkRecovered(typeof(T).Name);
+        // This type's recovery is complete. Publishability requires ALL expected subscribers to
+        // have recovered; the publish gate and IsReady combine runtime state with this signal.
+        _readiness?.MarkRecovered(TypeIdentity.Key<T>());
 
-        // Start background loops with proper lifecycle.
+        return base.StartAsync(cancellationToken);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Recovery + due-work seeding already ran in StartAsync. Start background loops.
         _cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _cleanupTask = CleanupLoopAsync(_cleanupCts.Token);
 
@@ -140,6 +148,10 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         {
             await foreach (var messageId in _wakeups.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
+                // Clear the outstanding marker BEFORE claiming so that a concurrent due-scan can
+                // re-signal this id if it still needs work after this attempt. This guarantees a
+                // message can never be permanently suppressed by dedup bookkeeping.
+                _outstanding.TryRemove(messageId, out _);
                 await ProcessMessageAsync(messageId, stoppingToken).ConfigureAwait(false);
             }
         }
@@ -155,7 +167,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         {
             await foreach (var envelope in _reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
-                _wakeups.Writer.TryWrite(envelope.MessageId);
+                TrySignal(envelope.MessageId);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -168,7 +180,28 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     {
         foreach (var due in _messageStore.GetDueMessages(_timeProvider.GetUtcNow()))
         {
-            _wakeups.Writer.TryWrite(due.MessageId);
+            TrySignal(due.MessageId);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a wake-up for <paramref name="messageId"/> unless one is already outstanding.
+    /// Bounded and de-duplicated: repeated due-scans for a slow consumer cannot accumulate
+    /// duplicate ids, and a full channel simply drops the (recoverable) signal.
+    /// </summary>
+    private void TrySignal(Guid messageId)
+    {
+        // Reserve the slot first; if an identical id is already outstanding, do nothing.
+        if (!_outstanding.TryAdd(messageId, 0))
+        {
+            return;
+        }
+
+        if (!_wakeups.Writer.TryWrite(messageId))
+        {
+            // Channel is at capacity — release the marker so reconciliation can retry later.
+            // The durable store remains the source of truth; nothing is lost.
+            _outstanding.TryRemove(messageId, out _);
         }
     }
 
@@ -207,18 +240,6 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             HermesTelemetry.ProcessingSucceeded.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path, "completed"));
             HermesTelemetry.ProcessingDuration.Record(Stopwatch.GetElapsedTime(startTs).TotalMilliseconds, HermesTelemetry.Tags(typeof(T), claimed.Path, "completed"));
         }
-        catch (CircuitBreakerOpenException)
-        {
-            // An open circuit must NOT count as a failed attempt or lead to dead-lettering
-            // (SDD 07). Reschedule the message and undo the attempt increment from the claim.
-            var nextAttemptAt = _timeProvider.GetUtcNow() + ComputeBackoff(Math.Max(1, claimed.AttemptCount));
-            _messageStore.ScheduleRetry(claimed.MessageId, nextAttemptAt, "Circuit breaker open");
-            if (claimed.AttemptCount > 0)
-            {
-                _messageStore.DecrementAttempt(claimed.MessageId);
-            }
-            _logger?.LogWarning("Circuit open for path '{Path}', MessageId: {MessageId} — rescheduled without consuming an attempt", claimed.Path, claimed.MessageId);
-        }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Shutdown mid-processing: leave as Processing so startup recovery returns it to
@@ -250,9 +271,9 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         }
 
         // Retryable. claimed.AttemptCount already reflects the attempt just made (incremented at claim).
-        if (claimed.AttemptCount >= _maxRetryAttempts)
+        if (claimed.AttemptCount >= _maxAttempts)
         {
-            _logger?.LogError(ex, "Message exhausted retries for path '{Path}', MessageId: {MessageId} — dead lettering", claimed.Path, claimed.MessageId);
+            _logger?.LogError(ex, "Message exhausted attempts for path '{Path}', MessageId: {MessageId} — dead lettering", claimed.Path, claimed.MessageId);
             DeadLetter(claimed, ex);
             return;
         }
@@ -264,7 +285,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         HermesTelemetry.ProcessingFailed.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path, "retry_scheduled"));
         HermesTelemetry.ProcessingRetried.Add(1, HermesTelemetry.Tags(typeof(T), claimed.Path));
         _logger?.LogWarning(ex, "Scheduling retry for path '{Path}', MessageId: {MessageId} (attempt {Attempt}/{MaxAttempts}) at {NextAttemptAt:o}",
-            claimed.Path, claimed.MessageId, claimed.AttemptCount, _maxRetryAttempts, nextAttemptAt);
+            claimed.Path, claimed.MessageId, claimed.AttemptCount, _maxAttempts, nextAttemptAt);
         _messageStore.ScheduleRetry(claimed.MessageId, nextAttemptAt, ex.Message);
     }
 
@@ -394,32 +415,17 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     /// </summary>
     private async Task DispatchOnceAsync(ChannelMessage<T> envelope, IServiceProvider services, CancellationToken cancellationToken)
     {
-        var circuitKey = CircuitKeyPrefix + envelope.Path;
-        if (_circuitBreaker.IsOpen(circuitKey))
-        {
-            _logger?.LogWarning("Circuit breaker is open for route '{Path}', MessageId: {MessageId} - skipping dispatch", envelope.Path, envelope.MessageId);
-            throw new CircuitBreakerOpenException($"Circuit breaker open for route: {envelope.Path}");
-        }
-
         var stopwatch = Stopwatch.StartNew();
         try
         {
             await _routes.DispatchAsync(envelope.Path, envelope.Body, services, cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
             ChannelMetrics.RecordDispatchSuccess(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
-            _circuitBreaker.RecordSuccess(circuitKey);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            stopwatch.Stop();
-            ChannelMetrics.RecordDispatchFailure(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
-            throw;
         }
         catch (Exception)
         {
             stopwatch.Stop();
             ChannelMetrics.RecordDispatchFailure(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
-            _circuitBreaker.RecordFailure(circuitKey);
             throw;
         }
     }

@@ -284,5 +284,9 @@ public class DurablePublishTests : IDisposable
         public bool DeleteDeadLetter(Guid messageId) => false;
 
         public int PurgeDeadLetters() => 0;
+
+        public MessageStoreStats GetStats() => new();
+
+        public int CleanupOldMessages() => 0;
     }
 }

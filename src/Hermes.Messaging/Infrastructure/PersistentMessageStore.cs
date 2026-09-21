@@ -273,8 +273,13 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
                 return false;
             }
 
+            // Explicit replay starts a fresh processing cycle with a full retry budget (HERMES-006 P4):
+            // reset the attempt count and clear the last error so the message is not re-dead-lettered
+            // after a single new attempt.
             message.Status = MessageStatus.Pending;
+            message.AttemptCount = 0;
             message.NextAttemptAt = null;
+            message.LastError = null;
             message.UpdatedAt = _timeProvider.GetUtcNow();
             _messages.Update(message);
             return true;
