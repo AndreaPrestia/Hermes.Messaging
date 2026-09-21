@@ -3,9 +3,8 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Hermes.Messaging.Domain.Interfaces;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Interface for handling dead letter messages of a specific type.

@@ -1,4 +1,4 @@
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -26,7 +26,6 @@ public class RetryDlqIntegrationTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>(
                     "test/poison",
                     (_, _, _) =>
@@ -70,7 +69,6 @@ public class RetryDlqIntegrationTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 // Observer that always throws — must NOT affect the durable record.
                 services.AddSingleton<IDeadLetterHandler<TestMessage>, ThrowingDeadLetterHandler>();
                 services.AddChannelSubscription<TestMessage>(

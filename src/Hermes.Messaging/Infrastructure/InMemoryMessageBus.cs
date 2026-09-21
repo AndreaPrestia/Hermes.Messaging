@@ -2,9 +2,8 @@ using System.Diagnostics;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using Hermes.Messaging.Domain.Entities;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Durable in-process message bus.

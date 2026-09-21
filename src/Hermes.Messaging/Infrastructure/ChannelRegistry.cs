@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
-using Hermes.Messaging.Domain.Entities;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Instance-based channel registry. Registered as a singleton in DI.

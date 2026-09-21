@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Infrastructure
+namespace Hermes.Messaging
 {
     public interface IMessageBus
     {

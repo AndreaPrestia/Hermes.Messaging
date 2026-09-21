@@ -1,6 +1,5 @@
-using Hermes.Messaging.Domain.Entities;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// A durable dead-letter entry exposed for administration. This is a read model that does not

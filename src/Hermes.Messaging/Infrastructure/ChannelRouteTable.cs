@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Stores the route handlers for a specific message type.

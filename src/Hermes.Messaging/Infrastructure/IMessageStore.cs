@@ -1,6 +1,5 @@
-using Hermes.Messaging.Domain.Entities;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Durable store for messages of a given payload type. This is the source of truth

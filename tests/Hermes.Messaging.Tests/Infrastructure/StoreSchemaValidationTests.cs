@@ -1,5 +1,4 @@
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using LiteDB;
 
 namespace Hermes.Messaging.Tests.Infrastructure;

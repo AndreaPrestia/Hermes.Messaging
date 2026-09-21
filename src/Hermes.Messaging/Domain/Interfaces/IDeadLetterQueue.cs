@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Domain.Interfaces;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Non-generic interface for dead letter queues to enable polymorphic handling.

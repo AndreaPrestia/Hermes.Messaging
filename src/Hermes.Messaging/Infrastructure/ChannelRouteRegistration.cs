@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Ensures a route gets registered during dependency injection resolution.

@@ -1,4 +1,28 @@
-# Public API Review — 0.4.0-alpha (breaking API cleanup)
+# Public API Review — 0.4.x (breaking API cleanup)
+
+> ## 0.4.1-alpha update — final API design before beta
+>
+> The `0.4.1-alpha` pass finalized the public API shape. Changes relative to the `0.4.0-alpha`
+> inventory below:
+>
+> - **Namespace:** every public consumer type moved to the single root **`Hermes.Messaging`**
+>   namespace (previously `Hermes.Messaging.Infrastructure`; `StoreSchemaMismatchException` was in
+>   `Hermes.Messaging.Domain.Entities`). A consumer now needs only `using Hermes.Messaging;`. The
+>   `Infrastructure`/`Domain.*` namespaces below are historical — no public type lives there anymore.
+> - **Removed:** `SubscribeAsync<T>` (misleading `Async` suffix), `AddDeadLetterQueue<T>` (redundant —
+>   DLQ infra is auto-registered by `AddChannelSubscription<T>`), and the obsolete
+>   `MessageBusOptions.MaxRetryAttempts` alias (use `MaxAttempts`).
+> - **Guard replaced:** the reflection snapshot (`docs/api/PublicAPI.txt` + `PublicApiSurfaceTests`)
+>   was removed in favor of `Microsoft.CodeAnalysis.PublicApiAnalyzers` with
+>   `src/Hermes.Messaging/PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt`. RS0016/RS0017 +
+>   nullability/duplicate/order rules are **build errors** (`.editorconfig`), giving compile-time
+>   coverage of signatures, nullable annotations, default parameter values, and generic constraints.
+>   Maintainers add a public API deliberately by recording it in `PublicAPI.Unshipped.txt`.
+>
+> The rest of this document is the original `0.4.0-alpha` internalization record; the KEEP/INTERNALIZE
+> decisions still hold (only the namespace prefixes and the three removals above have changed).
+
+---
 
 This document inventories the externally visible API of `Hermes.Messaging` after the `0.4.0-alpha`
 public-API cleanup and classifies each type as one of:
@@ -8,10 +32,9 @@ public-API cleanup and classifies each type as one of:
 - **OBSOLETE** — kept public for compatibility but marked `[Obsolete]`.
 - **REDESIGN** — public shape needs a deliberate change (recorded, may be deferred).
 
-The machine-readable snapshot of the resulting public surface is checked in at
-[`docs/api/PublicAPI.txt`](PublicAPI.txt) and asserted by `PublicApiSurfaceTests`. Any accidental
-addition/removal/change of a public type or member fails that test until a maintainer deliberately
-regenerates the baseline (env var `HERMES_UPDATE_PUBLIC_API=1`) and reviews the diff.
+The authoritative machine-readable public surface is now
+[`src/Hermes.Messaging/PublicAPI.Shipped.txt`](../../src/Hermes.Messaging/PublicAPI.Shipped.txt),
+enforced at build time by `Microsoft.CodeAnalysis.PublicApiAnalyzers` (see the 0.4.1 update above).
 
 The test project uses `[InternalsVisibleTo]`, and the benchmark project (which seeds the durable
 store directly as internal tooling) does too — so internalizing a type does **not** break tests or

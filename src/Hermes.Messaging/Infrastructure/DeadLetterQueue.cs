@@ -1,7 +1,6 @@
 using System.Threading.Channels;
-using Hermes.Messaging.Domain.Interfaces;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Dead Letter Queue for messages that failed after max retry attempts.

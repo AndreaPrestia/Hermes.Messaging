@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>Hermes.Messaging</PackageId>
-    <Version>0.4.0-alpha</Version>
+    <Version>0.4.1-alpha</Version>
     <Authors>Andrea Prestia</Authors>
     <Description>In-process, single-process durable message bus for .NET built on System.Threading.Channels with LiteDB persistence. Publish-before-signal durability, a durable state machine with crash recovery, persistent retry with jittered backoff, a durable dead-letter queue, explicit runtime lifecycle, and OpenTelemetry-compatible metrics and tracing (Hermes.Messaging).</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -41,15 +41,23 @@
   <ItemGroup>
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.5" />
+    <!--
+      Authoritative public-API compatibility guard. Unlike a reflection snapshot, the Roslyn
+      analyzer captures nullable annotations, optional/default parameter values, generic
+      constraints, and [Obsolete] state. Any accidental public API addition/removal/signature
+      change is a build error (RS0016/RS0017) until a maintainer records it in
+      PublicAPI.Unshipped.txt. Analyzer-only dependency (not shipped to consumers).
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
-  <!--
-    Public API surface guard: the intended public API is captured as a checked-in baseline
-    (docs/api/PublicAPI.txt) and asserted by PublicApiSurfaceTests. Any accidental new/changed
-    public type or member fails that test until a maintainer deliberately updates the baseline.
-    A lightweight reflection snapshot was chosen over Microsoft.CodeAnalysis.PublicApiAnalyzers to
-    avoid a prerelease analyzer dependency and a large hand-maintained canonical signature file.
-  -->
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
 
   <!--
     SourceLink is built into the .NET 10 SDK; with PublishRepositoryUrl + ContinuousIntegrationBuild

@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Result of a successful <see cref="IMessageBus.PublishAsync{T}"/> call.

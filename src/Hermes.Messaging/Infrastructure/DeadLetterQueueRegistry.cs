@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
-using Hermes.Messaging.Domain.Interfaces;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Thread-safe registry for all dead letter queues in the system.

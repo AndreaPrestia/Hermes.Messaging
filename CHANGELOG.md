@@ -5,6 +5,46 @@ changes are acceptable when required for correctness and are called out explicit
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.1-alpha] — 2026-09-21
+
+**Final public-API design pass before the future `0.5.0-beta` API freeze.** No runtime, delivery,
+persistence, retry, DLQ, reconciliation, lifecycle, or performance behavior changed — this is a
+namespace + API-shape cleanup plus a stronger API guard.
+
+### Changed (BREAKING — public API shape)
+- **Single consumer namespace.** All public consumer types moved to the root `Hermes.Messaging`
+  namespace. A normal application now needs only `using Hermes.Messaging;`. Previously public APIs
+  lived under `Hermes.Messaging.Infrastructure` and `StoreSchemaMismatchException` under
+  `Hermes.Messaging.Domain.Entities`; both are gone from the public surface.
+
+### Removed (BREAKING)
+- `ChannelSubscriptionExtensions.SubscribeAsync<T>` (both overloads) — the `Async` suffix was
+  misleading (synchronous, returned `IHostApplicationBuilder`, did no async work). Use
+  `Subscribe<T>` / `AddSubscription<T>` / `AddChannelSubscription<T>`.
+- `DependencyInjection.AddDeadLetterQueue<T>` — redundant; dead-letter infrastructure is registered
+  automatically by `AddChannelSubscription<T>`. No consumer action needed.
+- `MessageBusOptions.MaxRetryAttempts` — the obsolete alias is removed. Use `MaxAttempts`.
+
+### Added
+- **Authoritative public-API compatibility guard:** `Microsoft.CodeAnalysis.PublicApiAnalyzers`
+  with `src/Hermes.Messaging/PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt`. RS0016/RS0017 (and
+  nullability/duplicate/order rules) are **errors** via `.editorconfig`, so any public
+  addition/removal/signature/nullability/default-value/constraint change fails the build until a
+  maintainer records it in `PublicAPI.Unshipped.txt`. This replaces the previous reflection snapshot
+  (`docs/api/PublicAPI.txt` + `PublicApiSurfaceTests`, both removed) — one baseline, no competing guards.
+- Package smoke test now also covers `IDeadLetterAdministration<T>.Delete` (in addition to
+  List/Get/Replay/Purge), and uses only `using Hermes.Messaging;`.
+
+### Notes
+- Registration surface after cleanup: `AddHermesMessaging` (×2), `AddChannelSubscription<T>` (×2),
+  `Subscribe<T>`, `AddSubscription<T>`, `ChannelSubscriptionBuilder<T>.WithDeadLetterHandler<THandler>()`.
+- `HermesTelemetry` intentionally exposes only `Name` + `ActivitySource`; the `Meter`/instruments stay internal.
+- `IMessageBusDiagnostics.GetStoreStats<T>()` returns `null` when `T` has no registered durable store.
+- License/authors discrepancy (LICENSE `Kakama` vs NuGet `<Authors>` Andrea Prestia) is still
+  **unresolved** — requires a maintainer decision before public package release. Unchanged.
+
+Version bumped to `0.4.1-alpha`. Still alpha — the public API may change again before `0.5.0-beta`.
+
 ## [0.4.0-alpha] — 2026-09-21
 
 **Breaking public-API cleanup** in preparation for the future `0.5.0-beta` API freeze. No messaging

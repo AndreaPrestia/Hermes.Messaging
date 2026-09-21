@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Optional settings supplied when publishing a message.

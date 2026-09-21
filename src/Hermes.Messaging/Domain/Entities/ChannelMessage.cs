@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Domain.Entities;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Represents a message routed through the in-process channel infrastructure.

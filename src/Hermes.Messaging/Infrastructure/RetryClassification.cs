@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// How a failed processing attempt should be treated by the retry engine.

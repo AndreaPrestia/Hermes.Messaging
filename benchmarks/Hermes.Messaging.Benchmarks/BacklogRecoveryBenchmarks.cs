@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 

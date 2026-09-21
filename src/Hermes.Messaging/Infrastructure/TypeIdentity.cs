@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Stable runtime identity for a message type, used as a key for internal dictionaries

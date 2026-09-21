@@ -1,5 +1,5 @@
 using BenchmarkDotNet.Attributes;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 

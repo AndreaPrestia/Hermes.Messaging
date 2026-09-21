@@ -1,5 +1,4 @@
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -26,7 +25,6 @@ public class CorrelationIdTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddSingleton(correlationIds);
                 services.AddChannelSubscription<TestMessage>(
                     "test/correlation",

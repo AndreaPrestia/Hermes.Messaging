@@ -1,4 +1,4 @@
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -47,7 +47,6 @@ internal static class BenchSupport
                     opts.MaxConcurrency = maxConcurrency;
                     opts.InitialRetryDelayMs = 1;
                 });
-                services.AddDeadLetterQueue<BenchMessage>();
                 services.AddChannelSubscription<BenchMessage>(route, handler);
             })
             .Build();

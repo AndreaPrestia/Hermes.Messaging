@@ -1,4 +1,4 @@
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -40,7 +40,6 @@ if (mode == "crash")
         .ConfigureServices(services =>
         {
             services.AddHermesMessaging(opts => opts.PersistenceBasePath = basePath);
-            services.AddDeadLetterQueue<HarnessMessage>();
             services.AddChannelSubscription<HarnessMessage>(
                 "crash/route",
                 // Never completes: keeps the message from reaching Completed.
@@ -75,7 +74,6 @@ if (mode == "recover")
         .ConfigureServices(services =>
         {
             services.AddHermesMessaging(opts => opts.PersistenceBasePath = basePath);
-            services.AddDeadLetterQueue<HarnessMessage>();
             services.AddChannelSubscription<HarnessMessage>(
                 "crash/route",
                 (_, _, _) =>

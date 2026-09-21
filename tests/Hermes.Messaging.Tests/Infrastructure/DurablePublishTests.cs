@@ -1,5 +1,4 @@
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -30,7 +29,6 @@ public class DurablePublishTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>("durable/route", handler);
                 extra?.Invoke(services);
             })

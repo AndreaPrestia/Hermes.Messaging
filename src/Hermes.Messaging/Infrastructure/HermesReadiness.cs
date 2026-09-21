@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Tracks startup-recovery completion per message type. Registered as a singleton.

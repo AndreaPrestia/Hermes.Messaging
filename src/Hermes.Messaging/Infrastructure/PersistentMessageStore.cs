@@ -1,8 +1,7 @@
 using LiteDB;
 
-using Hermes.Messaging.Domain.Entities;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// LiteDB-based persistent storage for message bus messages.

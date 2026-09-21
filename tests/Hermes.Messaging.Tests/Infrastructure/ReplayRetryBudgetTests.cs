@@ -1,5 +1,4 @@
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -34,7 +33,6 @@ public class ReplayRetryBudgetTests : IDisposable
                     opts.MaxAttempts = 3;
                     opts.InitialRetryDelayMs = 1; // short, deterministic waits
                 });
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>(
                     "h007/replay",
                     (_, _, _) => { Interlocked.Increment(ref attempts); throw new InvalidOperationException("always fails"); });

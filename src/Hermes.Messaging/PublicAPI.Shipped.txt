@@ -1,0 +1,121 @@
+#nullable enable
+const Hermes.Messaging.HermesTelemetry.Name = "Hermes.Messaging" -> string!
+Hermes.Messaging.ChannelSubscriptionBuilder<T>
+Hermes.Messaging.ChannelSubscriptionBuilder<T>.WithDeadLetterHandler<THandler>() -> Hermes.Messaging.ChannelSubscriptionBuilder<T>!
+Hermes.Messaging.ChannelSubscriptionExtensions
+Hermes.Messaging.DeadLetterEntry<T>
+Hermes.Messaging.DeadLetterEntry<T>.AttemptCount.get -> int
+Hermes.Messaging.DeadLetterEntry<T>.AttemptCount.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.Body.get -> T
+Hermes.Messaging.DeadLetterEntry<T>.Body.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.CorrelationId.get -> System.Guid
+Hermes.Messaging.DeadLetterEntry<T>.CorrelationId.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.CreatedAt.get -> System.DateTimeOffset
+Hermes.Messaging.DeadLetterEntry<T>.CreatedAt.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.DeadLetteredAt.get -> System.DateTimeOffset
+Hermes.Messaging.DeadLetterEntry<T>.DeadLetteredAt.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.LastError.get -> string?
+Hermes.Messaging.DeadLetterEntry<T>.LastError.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.MessageId.get -> System.Guid
+Hermes.Messaging.DeadLetterEntry<T>.MessageId.init -> void
+Hermes.Messaging.DeadLetterEntry<T>.Route.get -> string!
+Hermes.Messaging.DeadLetterEntry<T>.Route.init -> void
+Hermes.Messaging.DeadLetterMessage<T>
+Hermes.Messaging.DeadLetterMessage<T>.Attempts.get -> int
+Hermes.Messaging.DeadLetterMessage<T>.Attempts.init -> void
+Hermes.Messaging.DeadLetterMessage<T>.Body.get -> T
+Hermes.Messaging.DeadLetterMessage<T>.Body.init -> void
+Hermes.Messaging.DeadLetterMessage<T>.CorrelationId.get -> System.Guid
+Hermes.Messaging.DeadLetterMessage<T>.CorrelationId.init -> void
+Hermes.Messaging.DeadLetterMessage<T>.DeadLetterMessage(string! Path, T Body, System.Exception! Exception, int Attempts, System.Guid CorrelationId, System.DateTimeOffset FailedAt) -> void
+Hermes.Messaging.DeadLetterMessage<T>.Exception.get -> System.Exception!
+Hermes.Messaging.DeadLetterMessage<T>.Exception.init -> void
+Hermes.Messaging.DeadLetterMessage<T>.FailedAt.get -> System.DateTimeOffset
+Hermes.Messaging.DeadLetterMessage<T>.FailedAt.init -> void
+Hermes.Messaging.DeadLetterMessage<T>.Path.get -> string!
+Hermes.Messaging.DeadLetterMessage<T>.Path.init -> void
+Hermes.Messaging.DependencyInjection
+Hermes.Messaging.HermesNotReadyException
+Hermes.Messaging.HermesNotReadyException.HermesNotReadyException(Hermes.Messaging.RuntimeState state) -> void
+Hermes.Messaging.HermesNotReadyException.State.get -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.HermesTelemetry
+Hermes.Messaging.IDeadLetterAdministration<T>
+Hermes.Messaging.IDeadLetterAdministration<T>.Delete(System.Guid messageId) -> bool
+Hermes.Messaging.IDeadLetterAdministration<T>.Get(System.Guid messageId) -> Hermes.Messaging.DeadLetterEntry<T>?
+Hermes.Messaging.IDeadLetterAdministration<T>.List(int skip = 0, int take = 100) -> System.Collections.Generic.IReadOnlyList<Hermes.Messaging.DeadLetterEntry<T>!>!
+Hermes.Messaging.IDeadLetterAdministration<T>.Purge() -> int
+Hermes.Messaging.IDeadLetterAdministration<T>.Replay(System.Guid messageId) -> bool
+Hermes.Messaging.IDeadLetterHandler<T>
+Hermes.Messaging.IDeadLetterHandler<T>.HandleAsync(Hermes.Messaging.DeadLetterMessage<T>! deadLetter, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+Hermes.Messaging.IMessageBus
+Hermes.Messaging.IMessageBus.PublishAsync<T>(string! route, T message, Hermes.Messaging.PublishOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Hermes.Messaging.PublishResult!>
+Hermes.Messaging.IMessageBusDiagnostics
+Hermes.Messaging.IMessageBusDiagnostics.CurrentState.get -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.IMessageBusDiagnostics.GetBacklogCount<T>() -> int
+Hermes.Messaging.IMessageBusDiagnostics.GetStoreStats<T>() -> Hermes.Messaging.MessageStoreStats?
+Hermes.Messaging.IMessageBusDiagnostics.IsHealthy.get -> bool
+Hermes.Messaging.IMessageBusDiagnostics.IsReady.get -> bool
+Hermes.Messaging.MessageBusOptions
+Hermes.Messaging.MessageBusOptions.DefaultChannelCapacity.get -> int
+Hermes.Messaging.MessageBusOptions.DefaultChannelCapacity.set -> void
+Hermes.Messaging.MessageBusOptions.InitialRetryDelayMs.get -> int
+Hermes.Messaging.MessageBusOptions.InitialRetryDelayMs.set -> void
+Hermes.Messaging.MessageBusOptions.MaxAttempts.get -> int
+Hermes.Messaging.MessageBusOptions.MaxAttempts.set -> void
+Hermes.Messaging.MessageBusOptions.MaxConcurrency.get -> int
+Hermes.Messaging.MessageBusOptions.MaxConcurrency.set -> void
+Hermes.Messaging.MessageBusOptions.MessageBusOptions() -> void
+Hermes.Messaging.MessageBusOptions.PersistenceBasePath.get -> string?
+Hermes.Messaging.MessageBusOptions.PersistenceBasePath.set -> void
+Hermes.Messaging.MessageBusOptions.ShutdownGracePeriod.get -> System.TimeSpan
+Hermes.Messaging.MessageBusOptions.ShutdownGracePeriod.set -> void
+Hermes.Messaging.MessageStoreStats
+Hermes.Messaging.MessageStoreStats.CompletedCount.get -> int
+Hermes.Messaging.MessageStoreStats.CompletedCount.init -> void
+Hermes.Messaging.MessageStoreStats.DeadLetteredCount.get -> int
+Hermes.Messaging.MessageStoreStats.DeadLetteredCount.init -> void
+Hermes.Messaging.MessageStoreStats.PendingCount.get -> int
+Hermes.Messaging.MessageStoreStats.PendingCount.init -> void
+Hermes.Messaging.MessageStoreStats.ProcessingCount.get -> int
+Hermes.Messaging.MessageStoreStats.ProcessingCount.init -> void
+Hermes.Messaging.MessageStoreStats.RetryScheduledCount.get -> int
+Hermes.Messaging.MessageStoreStats.RetryScheduledCount.init -> void
+Hermes.Messaging.MessageStoreStats.TotalCount.get -> int
+Hermes.Messaging.MessageStoreStats.TotalCount.init -> void
+Hermes.Messaging.NonRetryableException
+Hermes.Messaging.NonRetryableException.NonRetryableException(string! message) -> void
+Hermes.Messaging.NonRetryableException.NonRetryableException(string! message, System.Exception! innerException) -> void
+Hermes.Messaging.PublishOptions
+Hermes.Messaging.PublishOptions.CorrelationId.get -> System.Guid?
+Hermes.Messaging.PublishOptions.CorrelationId.set -> void
+Hermes.Messaging.PublishOptions.PublishOptions() -> void
+Hermes.Messaging.PublishResult
+Hermes.Messaging.PublishResult.AcceptedAt.get -> System.DateTimeOffset
+Hermes.Messaging.PublishResult.AcceptedAt.init -> void
+Hermes.Messaging.PublishResult.CorrelationId.get -> System.Guid
+Hermes.Messaging.PublishResult.CorrelationId.init -> void
+Hermes.Messaging.PublishResult.MessageId.get -> System.Guid
+Hermes.Messaging.PublishResult.MessageId.init -> void
+Hermes.Messaging.RouteNotFoundException
+Hermes.Messaging.RouteNotFoundException.MessageType.get -> System.Type!
+Hermes.Messaging.RouteNotFoundException.Route.get -> string!
+Hermes.Messaging.RouteNotFoundException.RouteNotFoundException(string! route, System.Type! messageType) -> void
+Hermes.Messaging.RuntimeState
+Hermes.Messaging.RuntimeState.Created = 0 -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.RuntimeState.Faulted = 5 -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.RuntimeState.Ready = 2 -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.RuntimeState.Starting = 1 -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.RuntimeState.Stopped = 4 -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.RuntimeState.Stopping = 3 -> Hermes.Messaging.RuntimeState
+Hermes.Messaging.StoreSchemaMismatchException
+Hermes.Messaging.StoreSchemaMismatchException.DatabasePath.get -> string!
+Hermes.Messaging.StoreSchemaMismatchException.FoundVersion.get -> int
+Hermes.Messaging.StoreSchemaMismatchException.StoreSchemaMismatchException(string! databasePath, int foundVersion, int supportedVersion) -> void
+Hermes.Messaging.StoreSchemaMismatchException.SupportedVersion.get -> int
+static Hermes.Messaging.ChannelSubscriptionExtensions.AddChannelSubscription<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! path, System.Func<T, System.IServiceProvider!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Hermes.Messaging.ChannelSubscriptionExtensions.AddChannelSubscription<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! path, System.Func<T, System.IServiceProvider!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler, System.Action<System.Threading.Channels.BoundedChannelOptions!>? configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Hermes.Messaging.ChannelSubscriptionExtensions.AddSubscription<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! path, System.Func<T, System.IServiceProvider!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler, System.Action<System.Threading.Channels.BoundedChannelOptions!>? configure = null) -> Hermes.Messaging.ChannelSubscriptionBuilder<T>!
+static Hermes.Messaging.ChannelSubscriptionExtensions.Subscribe<T>(this Microsoft.Extensions.Hosting.IHostApplicationBuilder! builder, string! path, System.Func<T, System.IServiceProvider!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler, System.Action<System.Threading.Channels.BoundedChannelOptions!>? configure = null) -> Hermes.Messaging.ChannelSubscriptionBuilder<T>!
+static Hermes.Messaging.DependencyInjection.AddHermesMessaging(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Hermes.Messaging.DependencyInjection.AddHermesMessaging(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Hermes.Messaging.MessageBusOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static readonly Hermes.Messaging.HermesTelemetry.ActivitySource -> System.Diagnostics.ActivitySource!

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -25,7 +24,6 @@ public class ObservabilityTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>("obs/route", handler);
             })
             .Build();

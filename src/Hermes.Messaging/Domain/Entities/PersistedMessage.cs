@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Domain.Entities;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Status of a persisted message in the store.

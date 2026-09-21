@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -33,7 +32,6 @@ public class LifecycleConcurrencyTests : IDisposable
                     opts.MaxConcurrency = maxConcurrency;
                     if (grace is not null) opts.ShutdownGracePeriod = grace.Value;
                 });
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>("life/route", handler);
             })
             .Build();

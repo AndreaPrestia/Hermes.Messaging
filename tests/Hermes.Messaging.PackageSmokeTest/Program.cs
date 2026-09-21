@@ -1,4 +1,4 @@
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -9,11 +9,11 @@ using Microsoft.Extensions.Hosting;
 //
 // Covered public capabilities:
 //   * create host + AddHermesMessaging(configure MessageBusOptions)
-//   * register a subscription (AddChannelSubscription) + a dead-letter queue
+//   * register a subscription (AddChannelSubscription) — dead-letter infra is auto-registered
 //   * start host, resolve IMessageBus, publish, receive/handle, read PublishResult
 //   * resolve IMessageBusDiagnostics, read IsReady / IsHealthy / CurrentState
 //   * throw NonRetryableException from a handler -> message is dead-lettered
-//   * manage dead letters via IDeadLetterAdministration<T> (List / Get / Replay / Purge)
+//   * manage dead letters via IDeadLetterAdministration<T> (List / Get / Delete / Replay / Purge)
 
 var handled = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 var poisonSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -29,14 +29,12 @@ using var host = Host.CreateDefaultBuilder()
             opts.InitialRetryDelayMs = 1;
         });
 
-        services.AddDeadLetterQueue<OrderCreated>();
         services.AddChannelSubscription<OrderCreated>("orders/created", (msg, _, _) =>
         {
             handled.TrySetResult(msg.OrderId);
             return Task.CompletedTask;
         });
 
-        services.AddDeadLetterQueue<PoisonMessage>();
         services.AddChannelSubscription<PoisonMessage>("orders/poison", (_, _, _) =>
         {
             poisonSeen.TrySetResult(true);
@@ -83,8 +81,25 @@ if (entry is null) Fail(4, "poison message was not dead-lettered / not visible v
 
 if (dlqAdmin.List().Count < 1) Fail(4, "IDeadLetterAdministration.List returned no entries");
 
-// Replay then purge, exercising the rest of the admin surface.
-if (!dlqAdmin.Replay(poison.MessageId)) Fail(4, "IDeadLetterAdministration.Replay returned false");
+// Delete the entry and confirm it is gone (exercises Delete).
+if (!dlqAdmin.Delete(poison.MessageId)) Fail(4, "IDeadLetterAdministration.Delete returned false");
+if (dlqAdmin.Get(poison.MessageId) is not null) Fail(4, "dead letter still present after Delete");
+
+// Dead-letter a second poison message, then Replay it and Purge the store (exercises Replay/Purge).
+poisonSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+var poison2 = await bus.PublishAsync("orders/poison", new PoisonMessage("bad-2"));
+await poisonSeen.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+DeadLetterEntry<PoisonMessage>? entry2 = null;
+deadline = DateTime.UtcNow.AddSeconds(15);
+while (DateTime.UtcNow < deadline)
+{
+    entry2 = dlqAdmin.Get(poison2.MessageId);
+    if (entry2 is not null) break;
+    await Task.Delay(50);
+}
+if (entry2 is null) Fail(4, "second poison message was not dead-lettered");
+if (!dlqAdmin.Replay(poison2.MessageId)) Fail(4, "IDeadLetterAdministration.Replay returned false");
 _ = dlqAdmin.Purge();
 
 await host.StopAsync();

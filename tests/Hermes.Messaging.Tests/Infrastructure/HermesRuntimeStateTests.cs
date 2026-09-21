@@ -1,4 +1,4 @@
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 
 namespace Hermes.Messaging.Tests.Infrastructure;
 

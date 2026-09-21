@@ -1,0 +1,17 @@
+root = true
+
+# Public API surface guard (Microsoft.CodeAnalysis.PublicApiAnalyzers).
+# These are the authoritative pre-beta API compatibility gate: any public API that is added,
+# removed, or changed (including nullable annotations, default parameter values, and generic
+# constraints) fails the build until a maintainer records it in PublicAPI.Unshipped.txt.
+[*.cs]
+# Public member is not declared in PublicAPI.{Shipped,Unshipped}.txt (accidental addition).
+dotnet_diagnostic.RS0016.severity = error
+# Declared public API was removed (breaking change — must be intentional).
+dotnet_diagnostic.RS0017.severity = error
+# A public API is declared with an oblivious reference type (missing nullable annotation).
+dotnet_diagnostic.RS0041.severity = error
+# Duplicate entries in the public API files.
+dotnet_diagnostic.RS0025.severity = error
+# Public API entry is not in the expected order / file consistency issues.
+dotnet_diagnostic.RS0024.severity = error

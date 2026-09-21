@@ -1,4 +1,4 @@
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 /// <summary>
 /// Provides diagnostics and health information for the message bus.

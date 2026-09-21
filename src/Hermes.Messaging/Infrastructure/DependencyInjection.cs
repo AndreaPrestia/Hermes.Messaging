@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 public static class DependencyInjection
 {
@@ -33,27 +33,6 @@ public static class DependencyInjection
 
         // Persistence is always enabled — ensure base path exists
         EnsurePersistenceBasePath(null);
-
-        return services;
-    }
-
-    /// <summary>
-    /// Registers a dead letter queue for a specific message type.
-    /// </summary>
-    /// <typeparam name="T">The message type.</typeparam>
-    /// <param name="services">The service collection.</param>
-    /// <returns>The service collection for chaining.</returns>
-    public static IServiceCollection AddDeadLetterQueue<T>(this IServiceCollection services)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        services.TryAddSingleton(sp =>
-        {
-            var queue = new DeadLetterQueue<T>();
-            var registry = sp.GetRequiredService<DeadLetterQueueRegistry>();
-            registry.Register(queue);
-            return queue;
-        });
 
         return services;
     }
@@ -116,17 +95,6 @@ public sealed class MessageBusOptions
     /// three handler invocations. Default is 3.
     /// </summary>
     public int MaxAttempts { get; set; } = 3;
-
-    /// <summary>
-    /// Obsolete alias for <see cref="MaxAttempts"/>. Same semantics (total handler invocations,
-    /// including the first). Retained temporarily for alpha compatibility.
-    /// </summary>
-    [Obsolete("Renamed to MaxAttempts (total handler invocations, including the first). Use MaxAttempts.")]
-    public int MaxRetryAttempts
-    {
-        get => MaxAttempts;
-        set => MaxAttempts = value;
-    }
 
     /// <summary>
     /// Gets or sets the initial retry delay in milliseconds.

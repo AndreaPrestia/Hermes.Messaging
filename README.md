@@ -176,11 +176,11 @@ services.AddSubscription<T>(path, handler);
 services.AddSubscription<T>(path, handler, channelOptions);
 ```
 
-Legacy methods are still available for backward compatibility:
+The service-collection form is also available directly (used by `AddSubscription` internally):
 
 ```csharp
 services.AddChannelSubscription<T>(path, handler);
-builder.SubscribeAsync<T>(path, handler);
+services.AddChannelSubscription<T>(path, handler, channelOptions);
 ```
 
 - Routes are **case-insensitive**.
@@ -235,9 +235,6 @@ Calling `Subscribe<T>` (or `AddChannelSubscription<T>`) auto-registers all requi
 | `MaxConcurrency` | `1` | Number of fixed async worker loops per type |
 | `ShutdownGracePeriod` | `30s` | Max wait for in-flight handlers during graceful shutdown |
 | `PersistenceBasePath` | `%LocalAppData%/Hermes/Messaging` | Directory for LiteDB files. One `.db` file per message type. |
-
-> `MaxRetryAttempts` is a deprecated alias of `MaxAttempts` (same semantics) retained for alpha
-> compatibility.
 
 ### Custom Channel Options
 
@@ -485,21 +482,29 @@ For those scenarios, use a real broker. Hermes targets reliable in-process work 
 
 ## Public API stability
 
-`0.4.0-alpha` performed a **breaking public-API cleanup**: implementation types (the durable store,
-channel registries/route tables, hosted subscribers, readiness/runtime-state holders, store telemetry
-registries, observer queues, and the persisted-entity types) are now `internal`. A normal consumer
-interacts with Hermes only through:
+The entire supported consumer API lives in a single namespace — a normal application needs only:
 
-- **Registration / configuration:** `AddHermesMessaging`, `AddChannelSubscription<T>` / `Subscribe<T>`,
-  `AddDeadLetterQueue<T>`, `ChannelSubscriptionBuilder<T>.WithDeadLetterHandler<THandler>()`,
-  `MessageBusOptions`.
+```csharp
+using Hermes.Messaging;
+```
+
+Implementation types (the durable store, channel registries/route tables, hosted subscribers,
+readiness/runtime-state holders, store telemetry registries, observer queues, and the persisted-entity
+types) are `internal`. A consumer interacts with Hermes only through:
+
+- **Registration / configuration:** `AddHermesMessaging`, `AddChannelSubscription<T>` / `Subscribe<T>` /
+  `AddSubscription<T>`, `ChannelSubscriptionBuilder<T>.WithDeadLetterHandler<THandler>()`,
+  `MessageBusOptions`. (Dead-letter infrastructure is registered automatically with each subscription —
+  there is no separate `AddDeadLetterQueue<T>` call.)
 - **Publishing:** `IMessageBus`, `PublishOptions`, `PublishResult`.
 - **Handling / retry contract:** the handler delegate, `IDeadLetterHandler<T>`, `DeadLetterMessage<T>`,
   and `NonRetryableException` (throw it from a handler to dead-letter immediately).
 - **Dead-letter administration:** `IDeadLetterAdministration<T>`, `DeadLetterEntry<T>`.
 - **Diagnostics:** `IMessageBusDiagnostics` (`IsReady`, `IsHealthy`, `CurrentState`, `GetBacklogCount<T>`,
-  `GetStoreStats<T>`), `MessageStoreStats`, `RuntimeState`.
-- **Telemetry:** `HermesTelemetry`.
+  `GetStoreStats<T>`), `MessageStoreStats`, `RuntimeState`. `GetStoreStats<T>()` returns `null` when no
+  durable store is registered for `T` (i.e. `T` has no subscription).
+- **Telemetry:** `HermesTelemetry` — exposes the stable `Name` and an `ActivitySource` consumers can
+  subscribe to; the internal `Meter`/instruments are not public.
 - **Exceptions that can escape:** `RouteNotFoundException`, `HermesNotReadyException`,
   `StoreSchemaMismatchException`.
 
@@ -509,6 +514,8 @@ engine, resolving/instantiating any implementation type, or mutating runtime sta
 internal and may change without notice.
 
 Stability note: **`0.4.x` remains alpha.** The public API may still change before the `0.5.0-beta`
-freeze. Implementation types are not supported extension points. The intended public surface is captured
-in [`docs/api/PublicAPI.txt`](docs/api/PublicAPI.txt) and guarded by an automated surface test, so
-accidental additions fail CI.
+freeze. Implementation types are not supported extension points. The exact public surface is captured in
+[`PublicAPI.Shipped.txt`](src/Hermes.Messaging/PublicAPI.Shipped.txt) and enforced at build time by
+`Microsoft.CodeAnalysis.PublicApiAnalyzers` (RS0016/RS0017 as errors), so accidental additions, removals,
+or signature/nullability changes fail CI. Maintainers add a public API deliberately by recording it in
+`PublicAPI.Unshipped.txt`.

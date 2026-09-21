@@ -1,4 +1,4 @@
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Collections.Concurrent;
@@ -17,7 +17,6 @@ public class InMemoryMessageBusTests : IDisposable
     private IServiceCollection ConfigureTestServices(IServiceCollection services)
     {
         services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-        services.AddDeadLetterQueue<TestMessage>();
         return services;
     }
 

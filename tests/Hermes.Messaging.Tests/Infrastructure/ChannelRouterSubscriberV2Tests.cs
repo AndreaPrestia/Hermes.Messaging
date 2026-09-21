@@ -1,5 +1,4 @@
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -25,7 +24,6 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>(
                     "test/success",
                     (message, _, _) =>
@@ -65,7 +63,6 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>(
                     "test/retry",
                     (message, _, _) =>
@@ -157,7 +154,6 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
             .ConfigureServices(services =>
             {
                 services.AddHermesMessaging(opts => opts.PersistenceBasePath = _tempPath);
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>(
                     "test/drain",
                     async (message, _, ct) =>

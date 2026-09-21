@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
-namespace Hermes.Messaging.Infrastructure;
+namespace Hermes.Messaging;
 
 public static class ChannelSubscriptionExtensions
 {
@@ -34,29 +34,6 @@ public static class ChannelSubscriptionExtensions
     {
         services.AddChannelSubscription(path, handler, configure);
         return new ChannelSubscriptionBuilder<T>(services);
-    }
-
-    public static IHostApplicationBuilder SubscribeAsync<T>(
-        this IHostApplicationBuilder builder,
-        string path,
-        Func<T, IServiceProvider, CancellationToken, Task> handler)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        builder.Services.AddChannelSubscription(path, handler);
-        return builder;
-    }
-
-    public static IHostApplicationBuilder SubscribeAsync<T>(
-        this IHostApplicationBuilder builder,
-        string path,
-        Func<T, IServiceProvider, CancellationToken, Task> handler,
-        Action<BoundedChannelOptions> configure)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        builder.Services.AddChannelSubscription(path, handler, configure);
-        return builder;
     }
 
     public static IServiceCollection AddChannelSubscription<T>(

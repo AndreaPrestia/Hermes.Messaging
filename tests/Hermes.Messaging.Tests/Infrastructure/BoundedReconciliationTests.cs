@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -36,7 +35,6 @@ public class BoundedReconciliationTests : IDisposable
                     opts.MaxConcurrency = maxConcurrency;
                     opts.InitialRetryDelayMs = 1;
                 });
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>("h007/route", handler);
             })
             .Build();

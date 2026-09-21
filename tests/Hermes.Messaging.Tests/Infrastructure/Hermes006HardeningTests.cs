@@ -1,5 +1,4 @@
-using Hermes.Messaging.Domain.Entities;
-using Hermes.Messaging.Infrastructure;
+using Hermes.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -221,17 +220,6 @@ public class Hermes006HardeningTests : IDisposable
         }
     }
 
-    [Fact]
-    public void MaxRetryAttempts_ObsoleteAlias_MapsToMaxAttempts()
-    {
-#pragma warning disable CS0618
-        var opts = new MessageBusOptions { MaxRetryAttempts = 7 };
-        Assert.Equal(7, opts.MaxAttempts);
-        opts.MaxAttempts = 2;
-        Assert.Equal(2, opts.MaxRetryAttempts);
-#pragma warning restore CS0618
-    }
-
     // ---------- P6: stable type-identity keys ----------
 
     [Fact]
@@ -315,7 +303,6 @@ public class Hermes006HardeningTests : IDisposable
                     opts.PersistenceBasePath = _tempPath;
                     configure?.Invoke(opts);
                 });
-                services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>("h006/route", handler);
             })
             .Build();
