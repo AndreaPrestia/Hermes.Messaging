@@ -42,6 +42,10 @@ public sealed class InMemoryMessageBus : IMessageBus
         ArgumentException.ThrowIfNullOrWhiteSpace(route);
         ArgumentNullException.ThrowIfNull(message);
 
+        // 0. Publishing is only allowed while the runtime is Ready. Before startup completes and
+        //    once shutdown has begun, new publishes are rejected (nothing is persisted).
+        _services.GetService<HermesRuntimeState>()?.EnsureReady();
+
         // 1. Validate route BEFORE any durable acceptance.
         var routes = _services.GetService<ChannelRouteTable<T>>();
         if (routes is null || !routes.HasRoute(route))

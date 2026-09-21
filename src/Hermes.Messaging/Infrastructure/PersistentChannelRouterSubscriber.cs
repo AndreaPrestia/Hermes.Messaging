@@ -28,13 +28,16 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     private readonly TimeSpan _initialRetryDelay;
     private readonly TimeSpan _maxRetryDelay;
     private readonly int _maxConcurrency;
+    private readonly TimeSpan _shutdownGracePeriod;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromHours(1);
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(1);
     private static readonly string CircuitKeyPrefix = typeof(T).Name + ":";
 
+    // Multiple fixed worker loops read from this channel concurrently, so SingleReader=false.
+    // Duplicate delivery of the same MessageId is harmless because TryClaim is atomic.
     private readonly Channel<Guid> _wakeups = Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions
     {
-        SingleReader = true,
+        SingleReader = false,
         SingleWriter = false
     });
 
@@ -76,6 +79,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         _initialRetryDelay = TimeSpan.FromMilliseconds(options?.InitialRetryDelayMs ?? 100);
         _maxRetryDelay = TimeSpan.FromSeconds(30);
         _maxConcurrency = Math.Max(1, options?.MaxConcurrency ?? 1);
+        _shutdownGracePeriod = options?.ShutdownGracePeriod ?? TimeSpan.FromSeconds(30);
 
         _ = registrations.ToArray();
     }
@@ -106,16 +110,31 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         // of truth; the wake-up is only an acceleration signal.
         var bridge = BridgeIncomingSignalsAsync(stoppingToken);
 
-        if (_maxConcurrency == 1)
+        // Fixed pool of async worker loops. No per-message Task.Run and no SemaphoreSlim:
+        // each worker awaits the shared wake-up channel and processes one message at a time.
+        var workers = new Task[_maxConcurrency];
+        for (var i = 0; i < _maxConcurrency; i++)
         {
-            await ProcessSequentialAsync(stoppingToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await ProcessConcurrentAsync(stoppingToken).ConfigureAwait(false);
+            workers[i] = WorkerLoopAsync(stoppingToken);
         }
 
+        await Task.WhenAll(workers).ConfigureAwait(false);
         await bridge.ConfigureAwait(false);
+    }
+
+    private async Task WorkerLoopAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await foreach (var messageId in _wakeups.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await ProcessMessageAsync(messageId, stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Expected on shutdown.
+        }
     }
 
     private async Task BridgeIncomingSignalsAsync(CancellationToken stoppingToken)
@@ -139,44 +158,6 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         {
             _wakeups.Writer.TryWrite(due.MessageId);
         }
-    }
-
-    private async Task ProcessSequentialAsync(CancellationToken stoppingToken)
-    {
-        await foreach (var messageId in _wakeups.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
-        {
-            await ProcessMessageAsync(messageId, stoppingToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task ProcessConcurrentAsync(CancellationToken stoppingToken)
-    {
-        // The wake-up channel is SingleReader=true; this loop is the sole reader.
-        // It hands off claimed work to bounded worker tasks. (A fixed worker-loop
-        // rewrite is deliberately deferred to HERMES-004.)
-        using var semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
-        var activeTasks = new List<Task>();
-
-        await foreach (var messageId in _wakeups.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
-        {
-            await semaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
-
-            activeTasks.RemoveAll(t => t.IsCompleted);
-
-            activeTasks.Add(Task.Run(async () =>
-            {
-                try
-                {
-                    await ProcessMessageAsync(messageId, stoppingToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }, stoppingToken));
-        }
-
-        await Task.WhenAll(activeTasks).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -366,10 +347,20 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             catch (OperationCanceledException) { /* expected */ }
         }
 
-        // Stop ExecuteAsync (signals stoppingToken, awaits in-flight handlers up to the host
-        // grace period). We deliberately do NOT drain the entire backlog: any message left
+        // Stop ExecuteAsync (signals stoppingToken, awaits in-flight handlers). Bound the wait
+        // by the configured grace period as well as the host's shutdown token — whichever is
+        // shorter. We deliberately do NOT drain the entire backlog: any message left
         // Pending/Processing stays durable and is recovered/re-signaled on the next start.
-        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        using var graceCts = new CancellationTokenSource(_shutdownGracePeriod);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, graceCts.Token);
+        try
+        {
+            await base.StopAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger?.LogWarning("Shutdown grace period ({Grace}) elapsed for {Type}; in-flight work left durable for restart", _shutdownGracePeriod, typeof(T).Name);
+        }
     }
 
     /// <summary>

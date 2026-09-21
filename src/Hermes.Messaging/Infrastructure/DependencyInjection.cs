@@ -21,6 +21,12 @@ public static class DependencyInjection
         services.TryAddSingleton<DeadLetterQueueRegistry>();
         services.TryAddSingleton<MessageBusOptions>();
         services.TryAddSingleton<IMessageBusDiagnostics, MessageBusDiagnostics>();
+        services.TryAddSingleton<HermesRuntimeState>();
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Runtime lifecycle: flips Ready on start; Stopping on ApplicationStopping (before any
+        // StopAsync drain); Stopped on ApplicationStopped.
+        services.AddHostedService<HermesLifecycle>();
 
         services.AddHostedService<DeadLetterQueueProcessor>();
 
@@ -124,4 +130,10 @@ public sealed class MessageBusOptions
     /// Gets or sets the base path for message persistence storage.
     /// </summary>
     public string? PersistenceBasePath { get; set; }
+
+    /// <summary>
+    /// Maximum time to wait for in-flight handlers to finish during graceful shutdown.
+    /// Work not completed within this window is left durable for restart. Default is 30s.
+    /// </summary>
+    public TimeSpan ShutdownGracePeriod { get; set; } = TimeSpan.FromSeconds(30);
 }

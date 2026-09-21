@@ -23,8 +23,15 @@
 > longer deletes dead letters, and an `IDeadLetterAdministration<T>` surface provides
 > non-destructive List/Get plus explicit Replay/Delete/Purge. Dead-letter observer
 > (`IDeadLetterHandler<T>`) success or failure cannot delete the durable record. The volatile
-> DLQ defect below is fixed.
-
+> DLQ defect below is fixed.>
+> **Phase 4 update (HERMES-004 implemented).** Explicit runtime lifecycle states
+> (`Created/Starting/Ready/Stopping/Stopped/Faulted`) are tracked in `HermesRuntimeState`;
+> publishing is allowed only in `Ready` (`HermesNotReadyException` otherwise). The per-message
+> `Task.Run` + `SemaphoreSlim` orchestration is replaced by a fixed pool of async worker loops
+> consuming the internal `Channel<Guid>`. Shutdown rejects new publishes first (via
+> `ApplicationStopping`), then awaits in-flight handlers up to a configurable
+> `ShutdownGracePeriod`, leaving the durable backlog for restart. The concurrency and lifecycle
+> defects below are fixed.
 Audited publish flow (baseline, before HERMES-001):
 ```text
 PublishAsync
@@ -80,12 +87,17 @@ Circuit breaker concerns (partially addressed in HERMES-003):
 - HalfOpen single-probe strictness and moving resilience to a handler/dependency-owned policy
   remain open (SDD 07 recommends removing the global breaker from core before 1.0).
 
-Concurrency concerns:
-- per-message `Task.Run`;
-- `SemaphoreSlim`;
-- active task list cleanup;
-- fragile shutdown/exception observation.
+Concurrency concerns (FIXED in HERMES-004):
+- ~~per-message `Task.Run`;~~
+- ~~`SemaphoreSlim`;~~
+- ~~active task list cleanup;~~
+- a fixed pool of N async worker loops now consumes the internal `Channel<Guid>` directly;
+- duplicate wake-ups are harmless because `TryClaim` is atomic.
 
-Lifecycle concern:
-- no explicit Created/Starting/Ready/Stopping/Stopped/Faulted state;
-- publishing can happen before recovery is complete or with no valid consumer.
+Lifecycle concern (FIXED in HERMES-004):
+- ~~no explicit Created/Starting/Ready/Stopping/Stopped/Faulted state;~~
+- explicit `RuntimeState` (Created/Starting/Ready/Stopping/Stopped/Faulted) is now tracked;
+- publishing is rejected unless the runtime is `Ready` (`HermesNotReadyException`);
+- shutdown flips to `Stopping` before any drain (via `ApplicationStopping`), rejecting new
+  publishes, then awaits in-flight handlers up to a configurable `ShutdownGracePeriod`,
+  leaving the durable backlog for restart.
