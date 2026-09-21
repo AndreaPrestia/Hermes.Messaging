@@ -1,5 +1,15 @@
 # 01 — Current State
 
+> **Hardening update (HERMES-006 implemented).** Post-implementation review fixes: publish is
+> gated on startup-recovery completion (readiness matches publishability); the reconciliation
+> wake-up layer is bounded and de-duplicated; all runtime components use `IMessageStore<T>` (no
+> publisher/subscriber split-brain); dead-letter replay resets the retry budget; `MaxRetryAttempts`
+> renamed to `MaxAttempts`; internal identity keys use `TypeIdentity` (FullName) to avoid short-name
+> collisions; the legacy circuit breaker was removed from core; durable backlog diagnostics come
+> from the store; telemetry meter version hard-coding removed; README aligned with the current API;
+> and a GitHub Actions CI workflow was added. Deferred (still open): BenchmarkDotNet, broad API
+> internalization, NuGet publishing, SourceLink.
+>
 > **Phase 1 update (HERMES-001 implemented).** The publish-before-persist defect
 > described below has been fixed. `PublishAsync` now validates the route, durably
 > persists the message (Pending) with a unique `MessageId`, and only then does a

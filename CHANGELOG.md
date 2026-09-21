@@ -7,7 +7,34 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.2.0-alpha]
 
-Durability and correctness hardening across HERMES-001 … HERMES-005.
+Durability and correctness hardening across HERMES-001 … HERMES-006.
+
+### Hardening review (HERMES-006)
+- **P1** Publishing is rejected until startup recovery completes; recovery runs synchronously during
+  host start. `IMessageBusDiagnostics.IsReady` matches publishability exactly.
+- **P2** Bounded, de-duplicated wake-up notification — reconciliation for a slow consumer no longer
+  grows notification memory; missed signals are still recovered.
+- **P3** Runtime components depend on `IMessageStore<T>`; publisher and subscriber cannot use
+  different stores. `GetStats`/`CleanupOldMessages` moved onto the abstraction.
+- **P4** Dead-letter replay resets the retry budget (`AttemptCount = 0`, error/next-attempt cleared).
+- **P5** `MessageBusOptions.MaxRetryAttempts` → `MaxAttempts` (total handler invocations incl. first);
+  obsolete alias retained.
+- **P6** `TypeIdentity.Key<T>()` (FullName-based) prevents short-name key collisions.
+- **P7** Deterministic post-commit cancellation test (store commit hook cancels the token, publish
+  still returns Accepted).
+- **P8** README rewritten to match the durable runtime, API, and semantics; added "When not to use".
+- **P9** GitHub Actions CI (`.github/workflows/ci.yml`) runs restore/build/test on .NET 10.
+- **P10** Removed hard-coded meter version; durable backlog diagnostics come from the store, not the
+  channel; volatile channel metrics are clearly separated.
+- **P11** Removed the legacy circuit breaker from core.
+
+#### Deferred (tracked, not done in HERMES-006)
+- BenchmarkDotNet project.
+- Broad public-API internalization of infrastructure types.
+- NuGet publishing workflow and SourceLink.
+- These items keep the original HERMES-005 scope **not fully complete**; they remain on the roadmap.
+
+### Original HERMES-001 … HERMES-005 changes
 
 ### Added
 - **Durable publish boundary (HERMES-001):** `PublishAsync` persists before signalling and returns

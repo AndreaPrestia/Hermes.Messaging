@@ -70,13 +70,14 @@ Metrics and traces use the stable name `Hermes.Messaging`:
 ### 1. Register the message bus
 
 ```csharp
-builder.Services.AddHermesMessageBus(options =>
+builder.Services.AddHermesMessaging(options =>
 {
     options.DefaultChannelCapacity = 10_000;
-    options.MaxRetryAttempts = 3;
+    options.MaxAttempts = 3;               // total handler invocations before dead-lettering
     options.InitialRetryDelayMs = 100;
-    options.MaxConcurrency = 4;           // parallel handlers per message type
-    options.PersistenceBasePath = "/data/messagebus"; // optional, defaults to LocalApplicationData
+    options.MaxConcurrency = 4;            // fixed worker loops per message type
+    options.ShutdownGracePeriod = TimeSpan.FromSeconds(30);
+    options.PersistenceBasePath = "/data/hermes"; // optional, defaults to LocalApplicationData
 });
 ```
 
@@ -113,7 +114,14 @@ public class OrderService(IMessageBus bus)
     {
         // ... create order ...
 
-        await bus.PublishAsync("orders/created", new OrderCreatedEvent(order.Id), ct);
+        PublishResult result = await bus.PublishAsync(
+            "orders/created",
+            new OrderCreatedEvent(order.Id),
+            options: new PublishOptions { CorrelationId = order.CorrelationId },
+            cancellationToken: ct);
+
+        // A returned result means the message is already durably committed.
+        _log.LogInformation("Accepted {MessageId} at {AcceptedAt}", result.MessageId, result.AcceptedAt);
     }
 }
 ```
@@ -122,15 +130,30 @@ public class OrderService(IMessageBus bus)
 
 ## Publishing Messages
 
-Inject `IMessageBus` and call `PublishAsync<T>`:
+Inject `IMessageBus` and call `PublishAsync<T>`. The signature is:
 
 ```csharp
-await bus.PublishAsync("route/path", payload, cancellationToken);
+ValueTask<PublishResult> PublishAsync<T>(
+    string route,
+    T message,
+    PublishOptions? options = null,
+    CancellationToken cancellationToken = default);
 ```
 
-- Each message gets a **UUIDv7 correlation ID** (time-ordered) for tracing.
-- If the channel has capacity, the write completes synchronously (zero allocation fast path).
-- If the channel is full, the publisher awaits with backpressure — it will **not** drop the message.
+- **Persist-before-signal:** the message is durably committed to the store *before* the call
+  returns. A returned `PublishResult` means it is already accepted; a lost in-memory signal never
+  loses it (the reconciliation loop recovers it).
+- **`PublishResult`** exposes `MessageId` (unique), `CorrelationId` (non-unique), and `AcceptedAt`.
+- **`PublishOptions`** lets you supply a `CorrelationId`; if omitted, a UUIDv7 is generated.
+- **Route is validated first** — publishing to an unknown route throws `RouteNotFoundException`
+  and persists nothing.
+- **Readiness gate:** publishing before startup recovery completes, or after shutdown has begun,
+  throws `HermesNotReadyException`.
+- **Cancellation** can prevent acceptance only *before* the durable commit; once committed the
+  accepted result is returned even if the token is then cancelled.
+
+> `options` is the **third** positional parameter and `cancellationToken` is the fourth. Do not
+> pass a `CancellationToken` as the third argument.
 
 ---
 
@@ -161,7 +184,9 @@ builder.SubscribeAsync<T>(path, handler);
 
 - Routes are **case-insensitive**.
 - A route can only be registered **once** per message type — duplicates throw `InvalidOperationException` at startup.
-- Publishing to a route with **no handler** throws `RouteNotFoundException` — the message is sent to the dead letter queue immediately (no retries).
+- Publishing to a route with **no handler** throws `RouteNotFoundException` at publish time and
+  persists nothing. (If a route is removed after a message was already accepted, that message is
+  dead-lettered without retries.)
 
 ### `ChannelSubscriptionBuilder<T>`
 
@@ -189,10 +214,11 @@ Calling `Subscribe<T>` (or `AddChannelSubscription<T>`) auto-registers all requi
 |-----------|----------|---------|
 | `ChannelRegistry` | Singleton | Bounded channel pool, one per `T` |
 | `ChannelRouteTable<T>` | Singleton | Route → handler mapping |
-| `DeadLetterQueue<T>` | Singleton | Failed messages storage |
-| `DeadLetterQueueRegistry` | Singleton | Type-keyed registry of all DLQs |
-| `PersistentMessageStore<T>` | Singleton | LiteDB crash recovery store |
-| `PersistentChannelRouterSubscriber<T>` | Hosted Service | Background reader/dispatcher |
+| `DeadLetterQueue<T>` | Singleton | Best-effort dead-letter observer channel |
+| `DeadLetterQueueRegistry` | Singleton | Type-keyed registry of all DLQ observers |
+| `PersistentMessageStore<T>` (as `IMessageStore<T>`) | Singleton | LiteDB durable store (source of truth) |
+| `IDeadLetterAdministration<T>` | Singleton | Durable DLQ admin: List/Get/Replay/Delete/Purge |
+| `PersistentChannelRouterSubscriber<T>` | Hosted Service | Fixed worker loops: claim → dispatch |
 
 ---
 
@@ -202,88 +228,107 @@ Calling `Subscribe<T>` (or `AddChannelSubscription<T>`) auto-registers all requi
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `DefaultChannelCapacity` | `10,000` | Max messages buffered per type before backpressure kicks in |
-| `MaxRetryAttempts` | `3` | Number of dispatch attempts before sending to DLQ |
-| `InitialRetryDelayMs` | `100` | First retry delay (doubles on each retry, capped at 30s) |
-| `MaxConcurrency` | `1` | Parallel message handlers per type. `1` = sequential, `> 1` = concurrent via `SemaphoreSlim` |
-| `PersistenceBasePath` | `%LocalAppData%/Hermes/MessageBus` | Directory for LiteDB files. One `.db` file per message type. |
+| `DefaultChannelCapacity` | `10,000` | Max messages buffered per type in the wake-up channel |
+| `MaxAttempts` | `3` | Total handler invocations (including the first) before dead-lettering |
+| `InitialRetryDelayMs` | `100` | First retry backoff (exponential, jittered, capped at 30s) |
+| `MaxConcurrency` | `1` | Number of fixed async worker loops per type |
+| `ShutdownGracePeriod` | `30s` | Max wait for in-flight handlers during graceful shutdown |
+| `PersistenceBasePath` | `%LocalAppData%/Hermes/Messaging` | Directory for LiteDB files. One `.db` file per message type. |
+
+> `MaxRetryAttempts` is a deprecated alias of `MaxAttempts` (same semantics) retained for alpha
+> compatibility.
 
 ### Custom Channel Options
 
-Override channel settings per subscription:
+Override wake-up channel settings per subscription:
 
 ```csharp
 builder.Subscribe<T>("path", handler, options =>
 {
     options.Capacity = 50_000;
-    options.SingleWriter = true;
 });
 ```
-
-> **Note:** `SingleReader` is always `true` — the subscriber loop is the sole channel reader even with `MaxConcurrency > 1` (workers receive already-dequeued items).
 
 ---
 
 ## Message Lifecycle
 
 ```
-┌──────────┐     ┌─────────┐     ┌───────────┐     ┌──────────────┐
-│ Published │────►│ Pending │────►│ Completed │     │ DeadLettered │
-└──────────┘     └─────────┘     └───────────┘     └──────────────┘
-                      │                                    ▲
-                      │          ┌──────────┐              │
-                      └─────────►│  Failed  │──────────────┘
-                                 └──────────┘
-                              (retry exhausted)
+Pending ──(TryClaim)─► Processing ──► Completed
+   ▲                     │
+   │                     ├──► RetryScheduled ──(due)──► Processing
+   │                     └──► DeadLettered
+   └──(explicit replay)──┘  ← DeadLettered
+
+startup: Processing left by a crash ──► Pending
 ```
 
-| Status | When | Stored in DB |
+| Status | When | Durable |
 |--------|------|:---:|
-| **Pending** | Message persisted, processing not yet started or in progress | ✅ |
+| **Pending** | Durably accepted, awaiting a worker claim | ✅ |
+| **Processing** | Claimed by a worker; being handled | ✅ (recovered to Pending on restart) |
+| **RetryScheduled** | Attempt failed; scheduled for a future retry (`NextAttemptAt`) | ✅ (survives restart) |
 | **Completed** | Handler returned successfully | ✅ (cleaned up after 7 days) |
-| **Failed** | Handler threw, but retries remain (replay will try again) | ✅ |
-| **DeadLettered** | All retries exhausted — moved to DLQ | ✅ (cleaned up after 7 days) |
+| **DeadLettered** | Attempts exhausted or non-retryable failure | ✅ (retained until explicit Delete/Purge) |
+
+> The ambiguous `Failed` state was retired. Old records carrying it are recovered to `Pending`.
 
 ### Crash Recovery
 
-On startup, `PersistentChannelRouterSubscriber<T>` calls `ReplayPendingMessagesAsync()`:
+On startup (synchronously, before the runtime becomes publishable), each subscriber:
 
-1. Queries all messages with `Status == Pending` from LiteDB.
-2. Re-dispatches them through the normal retry pipeline.
-3. Messages that exceed `MaxRetryAttempts` during replay are moved to the DLQ.
-4. Only after replay completes does the subscriber start reading from the live channel.
+1. `RecoverInterrupted()` — moves any `Processing` (or retired `Failed`) records back to `Pending`.
+2. Seeds the wake-up channel with all due work (`Pending` + due `RetryScheduled`), covering signals lost before startup.
+3. Marks its startup recovery complete; publishing is rejected until every subscriber has done so.
+
+A periodic reconciliation loop re-scans due work, so a lost in-memory signal is always recovered.
 
 ---
 
-## Retry & Circuit Breaker
+## Retry Semantics
 
-### Retry Policy
+- **Attempts:** `MaxAttempts` counts total handler invocations, including the first. `MaxAttempts = 1`
+  dead-letters after the first failure (no retries); `MaxAttempts = 3` allows exactly three.
+- **Durable backoff:** on a retryable failure the message becomes `RetryScheduled` with a
+  `NextAttemptAt` computed via bounded exponential backoff + full jitter (uses `TimeProvider`).
+  A worker is **never** held on a retry delay — the reconciliation loop re-signals when due.
+- **Classification (`RetryClassifier`):**
+  - non-retryable (`NonRetryableException`, `RouteNotFoundException`, `ArgumentException`,
+    `NotSupportedException`, `NotImplementedException`) → dead-letter immediately;
+  - cancellation during shutdown → not a failure (left durable for restart);
+  - everything else → retry until `MaxAttempts`, then dead-letter.
 
-- **Strategy:** Exponential backoff starting at `InitialRetryDelayMs`, doubling on each attempt, capped at 30 seconds.
-- **Max attempts:** Configurable via `MaxRetryAttempts` (default 3).
-- **Non-retryable:** `RouteNotFoundException` and `OperationCanceledException` bypass the retry loop entirely.
-
-### Circuit Breaker
-
-Each route has an independent circuit breaker (keyed by `{TypeName}:{route}`):
-
-| State | Behavior |
-|-------|----------|
-| **Closed** | Normal operation. Failures increment a counter. |
-| **Open** | Requests throw `CircuitBreakerOpenException` immediately. Auto-transitions to HalfOpen after `openDuration` (default 1 minute). |
-| **HalfOpen** | One test request is allowed. Success → Closed. Failure → Open again. |
-
-Defaults: threshold = **5 failures**, open duration = **1 minute**.
+> The legacy per-route circuit breaker was **removed from core** in 0.2.0-alpha. Resilience for
+> flaky downstream dependencies belongs in the handler or its dependency clients.
 
 ---
 
 ## Dead Letter Queue
 
-Messages that fail after all retries are moved to a per-type `DeadLetterQueue<T>`:
+The dead-letter queue is **durable**: `DeadLettered` is a persistent store state and is the source
+of truth. The in-memory `DeadLetterQueue<T>` channel is only a best-effort **observer** hook.
 
-- Bounded channel (capacity 10,000, `FullMode = Wait`).
-- If `TryEnqueue` fails (queue full), a **Critical** log is emitted and the message is permanently lost.
-- The `DeadLetterQueueProcessor` (single `BackgroundService`) polls all DLQs every 5 seconds, processing up to 100 messages per queue per cycle.
+- Dead-lettering writes the durable record **first**; if the observer channel is full the durable
+  record is still retained (only the notification is dropped).
+- Dead letters are **not** auto-cleaned by retention — they persist until an explicit delete/purge.
+- Administration is via `IDeadLetterAdministration<T>` (inspection is non-destructive):
+
+```csharp
+public sealed class DlqAdmin(IDeadLetterAdministration<OrderCreatedEvent> dlq)
+{
+    public IReadOnlyList<DeadLetterEntry<OrderCreatedEvent>> List() => dlq.List(skip: 0, take: 100);
+    public bool Replay(Guid messageId) => dlq.Replay(messageId); // -> Pending, fresh retry budget
+    public bool Delete(Guid messageId) => dlq.Delete(messageId);
+    public int Purge() => dlq.Purge();
+}
+```
+
+> **Replay resets the retry budget:** a replayed message returns to `Pending` with
+> `AttemptCount = 0` and a cleared error, so it gets a full set of attempts again.
+
+The `DeadLetterQueueProcessor` (single `BackgroundService`) drains the observer channels every 5
+seconds and invokes any registered `IDeadLetterHandler<T>`. An observer exception or a full observer
+channel can never delete the durable record.
 
 ### Custom DLQ Handler
 
@@ -325,29 +370,41 @@ public class HealthController(IMessageBusDiagnostics diag)
 {
     public IResult GetHealth()
     {
-        var healthy = diag.IsHealthy;
-        var backlog = diag.GetBacklogCount<OrderCreatedEvent>();
-        var circuit = diag.GetCircuitState<OrderCreatedEvent>("orders/created");
-        var stats   = diag.GetStoreStats<OrderCreatedEvent>();
+        var live    = diag.IsHealthy;                          // liveness
+        var ready   = diag.IsReady;                            // Ready + recovery complete
+        var backlog = diag.GetBacklogCount<OrderCreatedEvent>(); // durable: Pending+Processing+RetryScheduled
+        var stats   = diag.GetStoreStats<OrderCreatedEvent>();   // full durable counts
 
-        return Results.Ok(new { healthy, backlog, circuit, stats });
+        return Results.Ok(new { live, ready, backlog, stats });
     }
 }
 ```
 
-### OpenTelemetry Metrics
+- **`IsHealthy`** (liveness): the bus is resolvable and the runtime has not `Faulted`.
+- **`IsReady`** (readiness): runtime is `Ready` **and** startup recovery is complete for all
+  subscribers. This matches publishability exactly.
+- **`GetBacklogCount<T>()`** returns the **durable** backlog (`Pending + Processing + RetryScheduled`)
+  from the store — not in-memory channel counters. Dead letters are excluded.
 
-All metrics are emitted under the `Hermes.MessageBus` meter:
+### OpenTelemetry Metrics & Tracing
 
-| Metric | Type | Tags | Description |
-|--------|------|------|-------------|
-| `messagebus.enqueued` | Counter | `message_type`, `route` | Messages published to channel |
-| `messagebus.dispatched` | Counter | `message_type`, `route` | Successfully dispatched |
-| `messagebus.dispatch.failed` | Counter | `message_type`, `route` | Dispatch failures (per attempt) |
-| `messagebus.dispatch.retried` | Counter | `message_type`, `route` | Retry attempts |
-| `messagebus.dropped` | Counter | `message_type`, `route` | Messages dropped (no handler, DLQ full) |
-| `messagebus.dispatch.duration` | Histogram (ms) | `message_type`, `route` | Handler execution time |
-| `messagebus.backlog` | Gauge | `message_type`, `route` | Messages waiting in channel |
+Durable-state metrics and traces use the stable name **`Hermes.Messaging`** (both the meter and the
+`ActivitySource`). Tags are low-cardinality only (`message_type`, `route`, `outcome`) — MessageId and
+CorrelationId are never used as labels.
+
+| Instrument | Type | Description |
+|------------|------|-------------|
+| `messages.published` / `messages.persisted` | Counter | Accepted / durably committed |
+| `publish.failed` / `signal.missed` | Counter | Persist failure / dropped wake-up |
+| `processing.started/succeeded/failed/retried/deadlettered` | Counter | Processing outcomes |
+| `publish.duration` / `processing.duration` | Histogram (ms) | Latencies |
+| `messages.pending` / `messages.processing` / `messages.retry_scheduled` | Gauge | Durable backlog by state |
+| `deadletters.depth` | Gauge | Durable dead-letter count |
+
+A separate internal meter also emits volatile channel/dispatch counters (`messagebus.*`) describing
+the acceleration layer only; these are not the durable backlog.
+
+Tracing emits `Publish` and `Process` spans on the `Hermes.Messaging` `ActivitySource`.
 
 ---
 
@@ -363,33 +420,63 @@ Hermes.Messaging/
 │       └── IDeadLetterQueue.cs        # Non-generic interface for polymorphic DLQ access
 │
 └── Infrastructure/
-    ├── IMessageBus.cs                 # Core publish interface
-    ├── IMessageBusDiagnostics.cs      # Health & diagnostics interface
-    ├── InMemoryMessageBus.cs          # IMessageBus implementation
+    ├── IMessageBus.cs                 # Core publish interface (ValueTask<PublishResult>)
+    ├── PublishOptions.cs / PublishResult.cs
+    ├── IMessageBusDiagnostics.cs      # Liveness/readiness/backlog/stats
+    ├── InMemoryMessageBus.cs          # Publish: gate → validate → persist → signal → accept
     ├── MessageBusDiagnostics.cs       # IMessageBusDiagnostics implementation
     ├── DependencyInjection.cs         # AddHermesMessaging() + MessageBusOptions
-    ├── ChannelRegistry.cs             # Bounded channel pool (one per T)
+    ├── HermesRuntimeState.cs          # RuntimeState + HermesNotReadyException
+    ├── HermesLifecycle.cs             # Runtime lifecycle hosted service
+    ├── HermesReadiness.cs             # Per-type startup-recovery tracking
+    ├── HermesTelemetry.cs             # ActivitySource + durable meters (Hermes.Messaging)
+    ├── HermesStoreMetrics.cs          # Durable-state observable gauges
+    ├── TypeIdentity.cs                # Stable FullName-based internal identity keys
+    ├── RetryClassification.cs         # RetryClassifier + NonRetryableException
+    ├── IMessageStore.cs               # Durable store abstraction (source of truth)
+    ├── ChannelRegistry.cs             # Wake-up channel pool (one per T)
     ├── ChannelRouteTable.cs           # Route → handler dispatch + RouteNotFoundException
     ├── ChannelRouteRegistration.cs    # DI-time route wiring
-    ├── ChannelSubscriptionExtensions.cs  # Subscribe<T>() + AddSubscription<T>() + legacy SubscribeAsync<T>()
-    ├── ChannelSubscriptionBuilder.cs  # Fluent builder: WithDeadLetterHandler<T>()
-    ├── ChannelPublishExtensions.cs    # Fast-path TryWrite + backpressure fallback
-    ├── ChannelMetrics.cs              # OpenTelemetry counters, histograms, gauges
-    ├── PersistentMessageStore.cs      # LiteDB CRUD + cleanup + stats
-    ├── PersistentChannelRouterSubscriber.cs  # Core BackgroundService: persist → dispatch → retry
-    ├── CircuitBreaker.cs              # Per-route circuit breaker + CircuitBreakerOpenException
-    ├── DeadLetterQueue.cs             # Bounded DLQ channel + DeadLetterMessage<T>
-    ├── DeadLetterQueueRegistry.cs     # Type-keyed registry of all DLQs
-    └── DeadLetterQueueProcessor.cs    # BackgroundService: polls DLQs → IDeadLetterHandler<T>
+    ├── ChannelSubscriptionExtensions.cs / ChannelSubscriptionBuilder.cs
+    ├── ChannelMetrics.cs              # Volatile channel/dispatch metrics (acceleration layer)
+    ├── PersistentMessageStore.cs      # LiteDB IMessageStore<T> implementation
+    ├── PersistentChannelRouterSubscriber.cs  # Fixed worker loops: claim → dispatch → complete/retry/dead-letter
+    ├── DeadLetterAdministration.cs    # IDeadLetterAdministration<T> + DeadLetterEntry<T>
+    ├── DeadLetterQueue.cs             # Best-effort observer channel + DeadLetterMessage<T>
+    ├── DeadLetterQueueRegistry.cs     # Type-keyed registry of observer channels
+    └── DeadLetterQueueProcessor.cs    # BackgroundService: drains observer channels → IDeadLetterHandler<T>
 ```
 
 ---
 
 ## Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `LiteDB` | 5.0.21 | Embedded NoSQL database for message persistence |
-| `Microsoft.Extensions.Hosting.Abstractions` | 10.0.1 | `BackgroundService`, `IHostedService`, `IHostApplicationBuilder` |
+| Package | Purpose |
+|---------|---------|
+| `LiteDB` | Embedded database for durable message persistence |
+| `Microsoft.Extensions.Hosting.Abstractions` | `BackgroundService`, `IHostedService`, `IHostApplicationBuilder` |
 
 No external message broker required. The entire bus runs in-process.
+
+---
+
+## When *not* to use Hermes
+
+Hermes is deliberately a single-process, in-process durable bus. Do **not** use it for:
+
+- **Multi-process consumers** — the durable store is owned by one process; there is no cross-process locking.
+- **Multi-instance / horizontally scaled services** — each instance has its own store; there is no shared queue.
+- **Distributed messaging / cross-service transport** — use RabbitMQ, Azure Service Bus, Kafka, etc.
+- **Exactly-once processing** — delivery is at-least-once; duplicates are possible.
+- **Durability on ephemeral storage** — if the persistence path is not durable (e.g. a container tmpfs), crash recovery guarantees do not hold.
+
+For those scenarios, use a real broker. Hermes targets reliable in-process work within one service instance.
+
+---
+
+## Limitations
+
+- Single process / single instance; at-least-once; duplicates possible; not exactly-once.
+- Reconciliation runs on a fixed ~1s interval, which bounds the earliest effective retry.
+- Persisted records carry a `SchemaVersion` (currently 1); cross-version migration is a future concern.
+- Several infrastructure types remain public for now; broad API internalization is deferred.
