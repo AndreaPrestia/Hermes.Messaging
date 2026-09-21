@@ -5,7 +5,7 @@ changes are acceptable when required for correctness and are called out explicit
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.0-alpha]
+## [0.2.0-alpha] — 2026-09-21
 
 Durability and correctness hardening across HERMES-001 … HERMES-007.
 
