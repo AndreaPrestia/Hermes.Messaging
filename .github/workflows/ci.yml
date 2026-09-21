@@ -66,7 +66,8 @@ jobs:
           test -n "$PDB" || { echo "No portable PDB found in symbols package"; exit 1; }
           echo "Validating Source Link document map in $PDB"
           sourcelink print-json "$PDB" | grep -q '"documents"' || { echo "PDB has no Source Link document map"; exit 1; }
-          sourcelink print-urls "$PDB" | grep -qi 'github.com/AndreaPrestia/Hermes.Messaging' \
+          # Source Link maps source paths to raw.githubusercontent.com/<owner>/<repo>/<commit>/...
+          sourcelink print-urls "$PDB" | grep -qi 'AndreaPrestia/Hermes.Messaging' \
             || { echo "Source Link URLs do not point at the expected repository"; exit 1; }
           echo "SourceLink / package metadata OK"
 
