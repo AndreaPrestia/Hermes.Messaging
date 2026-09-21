@@ -55,4 +55,38 @@ internal static class BenchSupport
         await host.StartAsync();
         return host;
     }
+
+    /// <summary>
+    /// Blocks until the durable backlog for <typeparamref name="T"/> reaches zero, i.e. every
+    /// message has reached a terminal durable state (Completed or DeadLettered) — Pending,
+    /// Processing and RetryScheduled are all 0. This is the correct end-to-end completion signal:
+    /// a handler returning is NOT the same as the store having committed Completed. Throws
+    /// <see cref="TimeoutException"/> if the backlog does not drain within <paramref name="timeout"/>.
+    /// </summary>
+    public static void WaitForDurableDrain<T>(IHost host, TimeSpan timeout)
+    {
+        var diagnostics = host.Services.GetRequiredService<IMessageBusDiagnostics>();
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        var spin = new SpinWait();
+
+        while (diagnostics.GetBacklogCount<T>() > 0)
+        {
+            if (Environment.TickCount64 >= deadline)
+            {
+                throw new TimeoutException(
+                    $"Durable backlog for {typeof(T).Name} did not drain within {timeout}. " +
+                    $"Remaining backlog: {diagnostics.GetBacklogCount<T>()}.");
+            }
+
+            if (spin.NextSpinWillYield)
+            {
+                Thread.Sleep(1);
+                spin = new SpinWait();
+            }
+            else
+            {
+                spin.SpinOnce();
+            }
+        }
+    }
 }

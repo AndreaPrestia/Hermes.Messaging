@@ -36,7 +36,6 @@ internal static class BacklogProbe
             }
             seedSw.Stop();
 
-            var remaining = new CountdownEvent(size);
             var firstSw = new Stopwatch();
             var drainSw = new Stopwatch();
             var firstSeen = false;
@@ -48,18 +47,20 @@ internal static class BacklogProbe
                 route,
                 (_, _, _) =>
                 {
+                    // timeToFirst measures latency to the FIRST handler invocation only.
                     if (!firstSeen) { firstSeen = true; firstSw.Stop(); }
-                    remaining.Signal();
                     return Task.CompletedTask;
                 },
                 maxConcurrency: 4);
 
-            remaining.Wait(TimeSpan.FromMinutes(10));
+            // Drain is measured against the DURABLE store backlog reaching 0 (every record
+            // Completed/DeadLettered), not the handler countdown — a handler returning does not
+            // mean the record is durably Completed yet.
+            BenchSupport.WaitForDurableDrain<BenchMessage>(host, TimeSpan.FromMinutes(10));
             drainSw.Stop();
 
             await host.StopAsync();
             host.Dispose();
-            remaining.Dispose();
             BenchSupport.TryDelete(dir);
 
             var rate = size / Math.Max(0.001, drainSw.Elapsed.TotalSeconds);

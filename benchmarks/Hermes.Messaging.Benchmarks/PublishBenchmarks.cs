@@ -7,8 +7,14 @@ namespace Hermes.Messaging.Benchmarks;
 
 /// <summary>
 /// Measures the durable publish path: validation → LiteDB durable insert → best-effort signal →
-/// PublishResult. A no-op handler drains the channel so the store does not grow unbounded during
-/// the run, but the measured operation is the publish call itself.
+/// PublishResult. The measured operation is the publish call itself.
+/// <para>
+/// A fresh host/store is created per BenchmarkDotNet iteration and deleted afterwards, so the LiteDB
+/// file only ever holds the publishes of a single iteration (bounded) rather than growing across the
+/// whole run. A no-op handler is registered purely so the subscriber can drain the wake-up channel;
+/// draining does NOT shrink the durable store (Completed records persist until retention cleanup),
+/// which is exactly why per-iteration isolation — not the handler — is what keeps the store bounded.
+/// </para>
 /// </summary>
 [MemoryDiagnoser]
 public class PublishBenchmarks
@@ -22,8 +28,8 @@ public class PublishBenchmarks
     private string _storeDir = null!;
     private const string Route = "bench/publish";
 
-    [GlobalSetup]
-    public void Setup()
+    [IterationSetup]
+    public void IterationSetup()
     {
         _storeDir = BenchSupport.NewTempStore();
         _host = BenchSupport.StartHostAsync(_storeDir, Route, (_, _, _) => Task.CompletedTask).GetAwaiter().GetResult();
@@ -35,8 +41,8 @@ public class PublishBenchmarks
     public async Task<PublishResult> PublishAsync()
         => await _bus.PublishAsync(Route, _message);
 
-    [GlobalCleanup]
-    public void Cleanup()
+    [IterationCleanup]
+    public void IterationCleanup()
     {
         _host.StopAsync().GetAwaiter().GetResult();
         _host.Dispose();

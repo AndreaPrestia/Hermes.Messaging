@@ -38,11 +38,14 @@ public class BacklogRecoveryBenchmarks
         }
     }
 
-    /// <summary>Start the host and drain the entire pre-existing backlog to Completed.</summary>
+    /// <summary>
+    /// Start the host and drain the entire pre-existing backlog to durable Completed. Completion
+    /// is measured against the durable store backlog reaching 0, not the handler countdown — a
+    /// handler returning does not mean the record is durably Completed yet.
+    /// </summary>
     [Benchmark]
     public void RecoverAndDrain()
     {
-        var remaining = new CountdownEvent(Backlog);
         var firstStopwatch = Stopwatch.StartNew();
         var firstSeen = false;
 
@@ -52,16 +55,14 @@ public class BacklogRecoveryBenchmarks
             (_, _, _) =>
             {
                 if (!firstSeen) { firstSeen = true; firstStopwatch.Stop(); }
-                remaining.Signal();
                 return Task.CompletedTask;
             },
             maxConcurrency: 4).GetAwaiter().GetResult();
 
-        remaining.Wait(TimeSpan.FromMinutes(10));
+        BenchSupport.WaitForDurableDrain<BenchMessage>(host, TimeSpan.FromMinutes(10));
 
         host.StopAsync().GetAwaiter().GetResult();
         host.Dispose();
-        remaining.Dispose();
     }
 
     [IterationCleanup]

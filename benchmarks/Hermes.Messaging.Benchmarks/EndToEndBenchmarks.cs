@@ -7,8 +7,14 @@ namespace Hermes.Messaging.Benchmarks;
 
 /// <summary>
 /// Measures the full end-to-end path for a batch of messages:
-/// Publish → Persist → Signal → Claim → Handler → Completed, across concurrency levels.
+/// Publish → Persist → Signal → Claim → Handler → durable Completed, across concurrency levels.
 /// A fresh host/store is created per iteration so batches never overlap.
+/// <para>
+/// Completion is measured against the DURABLE store state (backlog == 0), not the handler
+/// returning. A handler returning only means the callback ran; the record is not yet Completed
+/// until <c>MarkCompleted</c> commits. Waiting on the durable backlog is the only faithful
+/// end-to-end signal.
+/// </para>
 /// </summary>
 [MemoryDiagnoser]
 public class EndToEndBenchmarks
@@ -18,21 +24,20 @@ public class EndToEndBenchmarks
 
     private const int BatchSize = 1000;
     private const string Route = "bench/e2e";
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromMinutes(2);
 
     private string _storeDir = null!;
     private IHost _host = null!;
     private IMessageBus _bus = null!;
-    private CountdownEvent _remaining = null!;
 
     [IterationSetup]
     public void IterationSetup()
     {
         _storeDir = BenchSupport.NewTempStore();
-        _remaining = new CountdownEvent(BatchSize);
         _host = BenchSupport.StartHostAsync(
             _storeDir,
             Route,
-            (_, _, _) => { _remaining.Signal(); return Task.CompletedTask; },
+            (_, _, _) => Task.CompletedTask,
             MaxConcurrency).GetAwaiter().GetResult();
         _bus = _host.Services.GetRequiredService<IMessageBus>();
     }
@@ -45,8 +50,8 @@ public class EndToEndBenchmarks
             _bus.PublishAsync(Route, BenchSupport.MakeMessage(i, 256)).AsTask().GetAwaiter().GetResult();
         }
 
-        // Wait until every message has been handled (completed end-to-end).
-        _remaining.Wait(TimeSpan.FromMinutes(2));
+        // Wait until every message is durably Completed (backlog drained to 0), not merely handled.
+        BenchSupport.WaitForDurableDrain<BenchMessage>(_host, DrainTimeout);
     }
 
     [IterationCleanup]
@@ -54,7 +59,6 @@ public class EndToEndBenchmarks
     {
         _host.StopAsync().GetAwaiter().GetResult();
         _host.Dispose();
-        _remaining.Dispose();
         BenchSupport.TryDelete(_storeDir);
     }
 }
