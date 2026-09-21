@@ -178,9 +178,21 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 
     private void SignalDueWork()
     {
-        foreach (var due in _messageStore.GetDueMessages(_timeProvider.GetUtcNow()))
+        // Only query as many due IDs as the wake-up channel can actually accept right now. This
+        // keeps reconciliation bounded regardless of backlog size: we never materialize the whole
+        // durable backlog just to signal a bounded number of IDs. Startup seeding uses this same
+        // path, so it is bounded too. The durable store remains the source of truth; anything not
+        // signalled this cycle is picked up by a later reconciliation as workers make progress.
+        var available = WakeupCapacity - _outstanding.Count;
+        if (available <= 0)
         {
-            TrySignal(due.MessageId);
+            return;
+        }
+
+        var dueIds = _messageStore.GetDueMessageIds(_timeProvider.GetUtcNow(), available);
+        foreach (var id in dueIds)
+        {
+            TrySignal(id);
         }
     }
 

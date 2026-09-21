@@ -260,6 +260,45 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
     }
 
     /// <summary>
+    /// The largest <c>limit</c> ever passed to <see cref="GetDueMessageIds"/> on this store.
+    /// Test/diagnostics seam only — lets tests assert reconciliation never requests more than the
+    /// bounded wake-up capacity, without reflecting into private state.
+    /// </summary>
+    internal int MaxRequestedDueLimit => Volatile.Read(ref _maxRequestedDueLimit);
+    private int _maxRequestedDueLimit;
+
+    /// <summary>
+    /// Returns at most <paramref name="limit"/> due-message IDs (oldest-first), enforcing the limit
+    /// at the query level and projecting IDs only (no payloads).
+    /// </summary>
+    public IReadOnlyList<Guid> GetDueMessageIds(DateTimeOffset now, int limit)
+    {
+        if (limit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), limit, "Limit must be greater than zero.");
+        }
+
+        // Record the largest requested limit for test/diagnostics assertions.
+        int prev;
+        while (limit > (prev = Volatile.Read(ref _maxRequestedDueLimit)))
+        {
+            if (Interlocked.CompareExchange(ref _maxRequestedDueLimit, limit, prev) == prev) break;
+        }
+
+        // Enforce the limit and project only the MessageId (v7 GUIDs are already time-ordered, and
+        // we additionally order by CreatedAt for deterministic oldest-first semantics). LiteDB
+        // applies Limit at the engine level, so at most `limit` documents are examined for output.
+        return _messages.Query()
+            .Where(x =>
+                x.Status == MessageStatus.Pending ||
+                (x.Status == MessageStatus.RetryScheduled && x.NextAttemptAt <= now))
+            .OrderBy(x => x.CreatedAt)
+            .Select(x => x.MessageId)
+            .Limit(limit)
+            .ToList();
+    }
+
+    /// <summary>
     /// Explicitly replays a dead-lettered message back to Pending.
     /// </summary>
     public bool ReplayDeadLetter(Guid messageId)

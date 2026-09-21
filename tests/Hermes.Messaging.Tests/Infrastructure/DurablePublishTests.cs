@@ -277,6 +277,8 @@ public class DurablePublishTests : IDisposable
 
         public IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now) => [];
 
+        public IReadOnlyList<Guid> GetDueMessageIds(DateTimeOffset now, int limit) => [];
+
         public bool ReplayDeadLetter(Guid messageId) => false;
 
         public IReadOnlyList<PersistedMessage<T>> ListDeadLetters(int skip = 0, int take = 100) => [];

@@ -23,6 +23,7 @@ internal abstract class DelegatingStore<T>(IMessageStore<T> inner) : IMessageSto
     public virtual void MarkDeadLettered(Guid messageId, string? error) => Inner.MarkDeadLettered(messageId, error);
     public virtual int RecoverInterrupted() => Inner.RecoverInterrupted();
     public virtual IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now) => Inner.GetDueMessages(now);
+    public virtual IReadOnlyList<Guid> GetDueMessageIds(DateTimeOffset now, int limit) => Inner.GetDueMessageIds(now, limit);
     public virtual bool ReplayDeadLetter(Guid messageId) => Inner.ReplayDeadLetter(messageId);
     public virtual IReadOnlyList<PersistedMessage<T>> ListDeadLetters(int skip = 0, int take = 100) => Inner.ListDeadLetters(skip, take);
     public virtual bool DeleteDeadLetter(Guid messageId) => Inner.DeleteDeadLetter(messageId);

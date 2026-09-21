@@ -88,6 +88,15 @@ public interface IMessageStore<T>
     IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now);
 
     /// <summary>
+    /// Returns at most <paramref name="limit"/> due-message IDs (Pending, or RetryScheduled whose
+    /// NextAttemptAt &lt;= <paramref name="now"/>), oldest-first. The limit is enforced at the query
+    /// level and only IDs are materialized — full payloads are not loaded. This lets reconciliation
+    /// scan only as much of the durable backlog as the wake-up channel can actually accept.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="limit"/> is &lt;= 0.</exception>
+    IReadOnlyList<Guid> GetDueMessageIds(DateTimeOffset now, int limit);
+
+    /// <summary>
     /// Explicitly replays a dead-lettered message by returning it to
     /// <see cref="MessageStatus.Pending"/>. Returns false if the message is not dead-lettered.
     /// </summary>
