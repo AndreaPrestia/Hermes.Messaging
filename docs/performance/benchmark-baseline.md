@@ -135,18 +135,22 @@ note above and must not be used as a baseline.
 
 ## Observations (interpretations)
 
-These are **plausible interpretations**, not proven claims.
+These are **plausible interpretations**, not proven claims. They reference the corrected re-run
+tables above (sections 1–4); the superseded pre-cleanup numbers are **not** used here.
 
-- **The durable LiteDB write dominates every path.** Publish latency (~0.6–0.7 ms) is largely
-  insensitive to payload size (100 B → 10 KB), consistent with a per-insert commit/fsync cost that
-  swamps serialization of small payloads.
+- **The durable LiteDB write dominates every path.** Publish latency (~290–314 µs, i.e. ~0.29–0.31 ms
+  — see section 1) is largely insensitive to payload size (100 B → 10 KB), consistent with a
+  per-insert commit/fsync cost that swamps serialization of small payloads.
 - **End-to-end throughput is flat across concurrency (1/4/16).** With a trivial handler, the single
   LiteDB store file (writes serialized behind a write-lock + commit) is the gate, not handler
   parallelism. `MaxConcurrency` helps when **handlers** are the bottleneck (I/O-bound work), not
   when the store is. This matches the intended architecture and is *not* a defect.
-- **Backlog recovery starts fast regardless of backlog size.** Time-to-first-message stays ~75–210 ms
-  even at 50k, confirming that bounded startup seeding (HERMES-007) does **not** block on
-  materializing the whole backlog. Drain rate stabilises around ~2.5k msg/s (write-bound).
+- **Backlog recovery starts fast regardless of backlog size.** Time-to-first-message stays low
+  (~75 ms at 10k, ~170 ms at 1k, ~291 ms at 50k — see section 3) even at 50k, confirming that
+  bounded startup seeding (HERMES-007) does **not** block on materializing the whole backlog.
+  Durable drain rate is write-bound and, measured to a fully `Completed` backlog, is roughly
+  ~1–2k msg/s (~987 msg/s at 1k, ~1,964 msg/s at 10k, ~1,796 msg/s at 50k); it does **not** improve
+  with backlog size and degrades slightly at larger backlogs as the store file grows.
 - **Per-type startup cost is roughly linear (~4 ms + ~4 ms/type; ~0.75 MB/type).** Each message type
   opens its own LiteDB database and hosted service. 100 types start in ~0.4 s — acceptable for the
   intended single-process scope. This is a known characteristic of the one-store-per-type model.

@@ -56,7 +56,9 @@ jobs:
       # external package). It fails CI if the debug metadata a consumer needs is missing.
       - name: Verify SourceLink / package metadata
         run: |
-          dotnet tool install --global sourcelink
+          # Pin the SourceLink CLI to the known-working version rather than floating latest, so the
+          # verification behaviour is deterministic across runs.
+          dotnet tool install --global sourcelink --version 3.1.1
           export PATH="$PATH:$HOME/.dotnet/tools"
           SYMBOLS=$(ls artifacts/*.snupkg | head -n1)
           echo "Inspecting symbols package: $SYMBOLS"
@@ -67,9 +69,14 @@ jobs:
           echo "Validating Source Link document map in $PDB"
           sourcelink print-json "$PDB" | grep -q '"documents"' || { echo "PDB has no Source Link document map"; exit 1; }
           # Source Link maps source paths to raw.githubusercontent.com/<owner>/<repo>/<commit>/...
-          sourcelink print-urls "$PDB" | grep -qi 'AndreaPrestia/Hermes.Messaging' \
+          URLS=$(sourcelink print-urls "$PDB")
+          echo "$URLS" | grep -qi 'AndreaPrestia/Hermes.Messaging' \
             || { echo "Source Link URLs do not point at the expected repository"; exit 1; }
-          echo "SourceLink / package metadata OK"
+          # The URLs must reference THIS commit, not a stale one. Match owner/repo/<sha>
+          # case-insensitively so harmless formatting/casing differences do not make CI brittle.
+          echo "$URLS" | grep -qi "AndreaPrestia/Hermes.Messaging/${GITHUB_SHA}" \
+            || { echo "Source Link URLs do not reference the current commit ${GITHUB_SHA}"; exit 1; }
+          echo "SourceLink / package metadata OK (repo + commit ${GITHUB_SHA})"
 
       # Restore + run the package smoke test against the freshly-packed local package. This proves
       # the shipped public API is sufficient for a real consumer (project-reference tests can hide

@@ -69,6 +69,18 @@ file or drain the old backlog first.
   is treated as version 0 (compatible). Newer/unknown schema is never silently treated as
   compatible.
 
+> **Future constraint — before the first `CurrentVersion` bump (v1 → v2).**
+> Today the only schema version is `1`, so writing the metadata document as
+> `max(storedVersion, CurrentVersion)` on open is safe: an older store is `1`, the running build is
+> `1`, and no record shape actually changed. This is **not** yet an active defect.
+>
+> Before `CurrentVersion` is ever raised to `2`, this metadata advancement must become an
+> **explicit migration / compatibility decision**. Opening a lower-version store must **not**
+> automatically stamp it as the new version unless that specific transition is known to be safe
+> (e.g. purely additive). Silently marking a v1 store as v2 would falsely assert that a
+> (potentially breaking) migration had been applied. When v2 is introduced, gate the metadata
+> write behind the documented per-transition policy rather than an unconditional `max(...)`.
+
 ### When should Hermes fail fast?
 
 - Store schema strictly newer than the running build (implemented).
