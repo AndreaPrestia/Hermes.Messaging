@@ -170,8 +170,18 @@ public class BoundedReconciliationTests : IDisposable
             Assert.True(store.MaxRequestedDueLimit <= WakeupCapacity,
                 $"Peak requested batch {store.MaxRequestedDueLimit} exceeded capacity {WakeupCapacity}.");
 
-            // All durable records reached Completed.
-            var stats = store.GetStats();
+            // All durable records eventually reach a terminal (non-active) state. The handler
+            // completing (allDone) does not guarantee MarkCompleted has already run for the very
+            // last messages, so poll until the active counts drain rather than asserting instantly.
+            MessageStoreStats stats = store.GetStats();
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline &&
+                   (stats.PendingCount + stats.ProcessingCount + stats.RetryScheduledCount) > 0)
+            {
+                await Task.Delay(50);
+                stats = store.GetStats();
+            }
+
             Assert.Equal(0, stats.PendingCount);
             Assert.Equal(0, stats.ProcessingCount);
             Assert.Equal(0, stats.RetryScheduledCount);
