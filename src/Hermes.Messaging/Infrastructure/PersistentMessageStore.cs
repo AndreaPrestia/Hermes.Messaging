@@ -14,16 +14,19 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
     private readonly LiteDatabase _db;
     private readonly ILiteCollection<PersistedMessage<T>> _messages;
     private readonly TimeSpan _completedRetention;
+    private readonly TimeProvider _timeProvider;
     private readonly object _writeLock = new();
     private volatile bool _disposed;
 
     public PersistentMessageStore(
         string databasePath,
-        TimeSpan? completedRetention = null)
+        TimeSpan? completedRetention = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
 
         _completedRetention = completedRetention ?? TimeSpan.FromDays(7);
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _db = new LiteDatabase(databasePath);
         _messages = _db.GetCollection<PersistedMessage<T>>($"messages_{typeof(T).Name}");
 
@@ -52,8 +55,8 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             Body = message.Body,
             Status = MessageStatus.Pending,
             AttemptCount = 0,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = _timeProvider.GetUtcNow(),
+            UpdatedAt = _timeProvider.GetUtcNow(),
             NextAttemptAt = null
         };
 
@@ -81,7 +84,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             if (message != null)
             {
                 message.Status = status;
-                message.UpdatedAt = DateTimeOffset.UtcNow;
+                message.UpdatedAt = _timeProvider.GetUtcNow();
                 message.LastError = error;
                 _messages.Update(message);
             }
@@ -100,7 +103,26 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             if (message != null)
             {
                 message.AttemptCount++;
-                message.UpdatedAt = DateTimeOffset.UtcNow;
+                message.UpdatedAt = _timeProvider.GetUtcNow();
+                _messages.Update(message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Decrements the attempt count (floored at zero) for a message. Used to undo a claim's
+    /// attempt increment when no real attempt was made (e.g. an open circuit skipped dispatch).
+    /// </summary>
+    public void DecrementAttempt(Guid messageId)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return;
+            var message = _messages.FindOne(x => x.MessageId == messageId);
+            if (message != null && message.AttemptCount > 0)
+            {
+                message.AttemptCount--;
+                message.UpdatedAt = _timeProvider.GetUtcNow();
                 _messages.Update(message);
             }
         }
@@ -135,7 +157,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             var isClaimable =
                 message.Status == MessageStatus.Pending ||
                 (message.Status == MessageStatus.RetryScheduled &&
-                 (message.NextAttemptAt is null || message.NextAttemptAt <= DateTimeOffset.UtcNow));
+                 (message.NextAttemptAt is null || message.NextAttemptAt <= _timeProvider.GetUtcNow()));
 
             if (!isClaimable)
             {
@@ -145,7 +167,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             message.Status = MessageStatus.Processing;
             message.AttemptCount++;
             message.NextAttemptAt = null;
-            message.UpdatedAt = DateTimeOffset.UtcNow;
+            message.UpdatedAt = _timeProvider.GetUtcNow();
             _messages.Update(message);
             return message;
         }
@@ -170,7 +192,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
                 message.Status = MessageStatus.RetryScheduled;
                 message.NextAttemptAt = nextAttemptAt;
                 message.LastError = error;
-                message.UpdatedAt = DateTimeOffset.UtcNow;
+                message.UpdatedAt = _timeProvider.GetUtcNow();
                 _messages.Update(message);
             }
         }
@@ -190,7 +212,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
                 message.Status = MessageStatus.DeadLettered;
                 message.NextAttemptAt = null;
                 message.LastError = error;
-                message.UpdatedAt = DateTimeOffset.UtcNow;
+                message.UpdatedAt = _timeProvider.GetUtcNow();
                 _messages.Update(message);
             }
         }
@@ -215,7 +237,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             {
                 message.Status = MessageStatus.Pending;
                 message.NextAttemptAt = null;
-                message.UpdatedAt = DateTimeOffset.UtcNow;
+                message.UpdatedAt = _timeProvider.GetUtcNow();
                 _messages.Update(message);
             }
 
@@ -252,7 +274,7 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
 
             message.Status = MessageStatus.Pending;
             message.NextAttemptAt = null;
-            message.UpdatedAt = DateTimeOffset.UtcNow;
+            message.UpdatedAt = _timeProvider.GetUtcNow();
             _messages.Update(message);
             return true;
         }
@@ -276,18 +298,64 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
     }
 
     /// <summary>
-    /// Cleans up old completed messages based on retention policy.
+    /// Cleans up old Completed messages based on retention policy. Dead-lettered messages are
+    /// NOT auto-deleted — the durable DLQ is retained until an explicit Delete/Purge.
     /// </summary>
     public int CleanupOldMessages()
     {
         lock (_writeLock)
         {
             if (_disposed) return 0;
-            var cutoff = DateTimeOffset.UtcNow - _completedRetention;
+            var cutoff = _timeProvider.GetUtcNow() - _completedRetention;
 
             return _messages.DeleteMany(x =>
-                (x.Status == MessageStatus.Completed || x.Status == MessageStatus.DeadLettered)
-                && x.UpdatedAt < cutoff);
+                x.Status == MessageStatus.Completed && x.UpdatedAt < cutoff);
+        }
+    }
+
+    /// <summary>
+    /// Lists dead-lettered messages ordered by last-updated time, with paging.
+    /// </summary>
+    public IReadOnlyList<PersistedMessage<T>> ListDeadLetters(int skip = 0, int take = 100)
+    {
+        if (skip < 0) skip = 0;
+        if (take <= 0) take = 100;
+
+        return _messages.Query()
+            .Where(x => x.Status == MessageStatus.DeadLettered)
+            .OrderBy(x => x.UpdatedAt)
+            .Skip(skip)
+            .Limit(take)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Deletes a single dead-lettered message by id. Returns false if it is not dead-lettered.
+    /// </summary>
+    public bool DeleteDeadLetter(Guid messageId)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return false;
+            var message = _messages.FindOne(x => x.MessageId == messageId);
+            if (message is null || message.Status != MessageStatus.DeadLettered)
+            {
+                return false;
+            }
+
+            return _messages.Delete(message.Id);
+        }
+    }
+
+    /// <summary>
+    /// Deletes all dead-lettered messages. Returns the number removed.
+    /// </summary>
+    public int PurgeDeadLetters()
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return 0;
+            return _messages.DeleteMany(x => x.Status == MessageStatus.DeadLettered);
         }
     }
 

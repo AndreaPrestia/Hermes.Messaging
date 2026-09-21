@@ -36,6 +36,12 @@ public interface IMessageStore<T>
     void IncrementAttempt(Guid messageId);
 
     /// <summary>
+    /// Decrements the attempt count (floored at zero). Used to undo a claim's attempt increment
+    /// when no real attempt was made (e.g. an open circuit skipped dispatch).
+    /// </summary>
+    void DecrementAttempt(Guid messageId);
+
+    /// <summary>
     /// Gets all pending messages, ordered by creation time, for replay after restart.
     /// </summary>
     IEnumerable<PersistedMessage<T>> GetPendingMessages();
@@ -86,4 +92,19 @@ public interface IMessageStore<T>
     /// <see cref="MessageStatus.Pending"/>. Returns false if the message is not dead-lettered.
     /// </summary>
     bool ReplayDeadLetter(Guid messageId);
+
+    /// <summary>
+    /// Lists dead-lettered messages ordered by last-updated time, with paging.
+    /// </summary>
+    IReadOnlyList<PersistedMessage<T>> ListDeadLetters(int skip = 0, int take = 100);
+
+    /// <summary>
+    /// Deletes a single dead-lettered message by id. Returns false if it is not dead-lettered.
+    /// </summary>
+    bool DeleteDeadLetter(Guid messageId);
+
+    /// <summary>
+    /// Deletes all dead-lettered messages. Returns the number removed.
+    /// </summary>
+    int PurgeDeadLetters();
 }

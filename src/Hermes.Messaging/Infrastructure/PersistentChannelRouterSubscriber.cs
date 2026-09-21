@@ -22,6 +22,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     private readonly DeadLetterQueue<T> _deadLetterQueue;
     private readonly CircuitBreaker _circuitBreaker;
     private readonly PersistentMessageStore<T> _messageStore;
+    private readonly TimeProvider _timeProvider;
 
     private readonly int _maxRetryAttempts;
     private readonly TimeSpan _initialRetryDelay;
@@ -51,7 +52,8 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         CircuitBreaker circuitBreaker,
         PersistentMessageStore<T> messageStore,
         IEnumerable<ChannelRouteRegistration<T>> registrations,
-        MessageBusOptions? options = null)
+        MessageBusOptions? options = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(routes);
         ArgumentNullException.ThrowIfNull(scopeFactory);
@@ -68,6 +70,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         _deadLetterQueue = deadLetterQueue;
         _circuitBreaker = circuitBreaker;
         _messageStore = messageStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         _maxRetryAttempts = options?.MaxRetryAttempts ?? 3;
         _initialRetryDelay = TimeSpan.FromMilliseconds(options?.InitialRetryDelayMs ?? 100);
@@ -132,7 +135,7 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 
     private void SignalDueWork()
     {
-        foreach (var due in _messageStore.GetDueMessages(DateTimeOffset.UtcNow))
+        foreach (var due in _messageStore.GetDueMessages(_timeProvider.GetUtcNow()))
         {
             _wakeups.Writer.TryWrite(due.MessageId);
         }
@@ -202,6 +205,18 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             await DispatchOnceAsync(envelope, scope.ServiceProvider, stoppingToken).ConfigureAwait(false);
             _messageStore.MarkCompleted(claimed.MessageId);
         }
+        catch (CircuitBreakerOpenException)
+        {
+            // An open circuit must NOT count as a failed attempt or lead to dead-lettering
+            // (SDD 07). Reschedule the message and undo the attempt increment from the claim.
+            var nextAttemptAt = _timeProvider.GetUtcNow() + ComputeBackoff(Math.Max(1, claimed.AttemptCount));
+            _messageStore.ScheduleRetry(claimed.MessageId, nextAttemptAt, "Circuit breaker open");
+            if (claimed.AttemptCount > 0)
+            {
+                _messageStore.DecrementAttempt(claimed.MessageId);
+            }
+            _logger?.LogWarning("Circuit open for path '{Path}', MessageId: {MessageId} — rescheduled without consuming an attempt", claimed.Path, claimed.MessageId);
+        }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Shutdown mid-processing: leave as Processing so startup recovery returns it to
@@ -210,46 +225,57 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         }
         catch (Exception ex)
         {
-            HandleAttemptFailure(claimed, ex);
+            HandleAttemptFailure(claimed, ex, stoppingToken.IsCancellationRequested);
         }
     }
 
-    private void HandleAttemptFailure(PersistedMessage<T> claimed, Exception ex)
+    private void HandleAttemptFailure(PersistedMessage<T> claimed, Exception ex, bool shutdownRequested)
     {
-        // A missing route is a configuration error — do not retry, dead-letter immediately.
-        if (ex is RouteNotFoundException)
+        var disposition = RetryClassifier.Classify(ex, shutdownRequested);
+
+        if (disposition == FailureDisposition.Shutdown)
         {
-            _logger?.LogError(ex, "No route for path '{Path}', MessageId: {MessageId} — dead lettering (no retry)", claimed.Path, claimed.MessageId);
-            if (!_deadLetterQueue.TryEnqueue(claimed.Path, claimed.Body, ex, claimed.AttemptCount, claimed.CorrelationId))
-            {
-                ChannelMetrics.RecordDropped(typeof(T), claimed.Path);
-            }
-            _messageStore.MarkDeadLettered(claimed.MessageId, ex.Message);
+            // Handler propagated cancellation during shutdown: leave for recovery on restart.
+            _logger?.LogDebug("Handler cancelled during shutdown for MessageId: {MessageId} — will recover on next startup", claimed.MessageId);
             return;
         }
 
-        // claimed.AttemptCount already reflects the attempt just made (incremented at claim).
+        if (disposition == FailureDisposition.DeadLetter)
+        {
+            _logger?.LogError(ex, "Non-retryable failure for path '{Path}', MessageId: {MessageId} — dead lettering (no retry)", claimed.Path, claimed.MessageId);
+            DeadLetter(claimed, ex);
+            return;
+        }
+
+        // Retryable. claimed.AttemptCount already reflects the attempt just made (incremented at claim).
         if (claimed.AttemptCount >= _maxRetryAttempts)
         {
             _logger?.LogError(ex, "Message exhausted retries for path '{Path}', MessageId: {MessageId} — dead lettering", claimed.Path, claimed.MessageId);
-
-            if (!_deadLetterQueue.TryEnqueue(claimed.Path, claimed.Body, ex, claimed.AttemptCount, claimed.CorrelationId))
-            {
-                _logger?.LogCritical("Dead letter queue is full — message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", claimed.Path, claimed.MessageId);
-                ChannelMetrics.RecordDropped(typeof(T), claimed.Path);
-            }
-
-            _messageStore.MarkDeadLettered(claimed.MessageId, ex.Message);
+            DeadLetter(claimed, ex);
             return;
         }
 
         // Durably schedule a future retry with jittered exponential backoff. The worker is
         // NOT held by the delay — the reconciliation loop re-signals the message when due.
-        var nextAttemptAt = DateTimeOffset.UtcNow + ComputeBackoff(claimed.AttemptCount);
+        var nextAttemptAt = _timeProvider.GetUtcNow() + ComputeBackoff(claimed.AttemptCount);
         ChannelMetrics.RecordRetry(typeof(T), claimed.Path);
         _logger?.LogWarning(ex, "Scheduling retry for path '{Path}', MessageId: {MessageId} (attempt {Attempt}/{MaxAttempts}) at {NextAttemptAt:o}",
             claimed.Path, claimed.MessageId, claimed.AttemptCount, _maxRetryAttempts, nextAttemptAt);
         _messageStore.ScheduleRetry(claimed.MessageId, nextAttemptAt, ex.Message);
+    }
+
+    private void DeadLetter(PersistedMessage<T> claimed, Exception ex)
+    {
+        // Durable record FIRST — this is the source of truth and must never depend on the
+        // volatile observer channel. The observer enqueue below is best-effort only.
+        _messageStore.MarkDeadLettered(claimed.MessageId, ex.Message);
+
+        if (!_deadLetterQueue.TryEnqueue(claimed.Path, claimed.Body, ex, claimed.AttemptCount, claimed.CorrelationId))
+        {
+            // The durable DeadLettered record still exists; only the observer notification was dropped.
+            _logger?.LogWarning("Dead letter observer queue is full for path '{Path}', MessageId: {MessageId} — durable record retained", claimed.Path, claimed.MessageId);
+            ChannelMetrics.RecordDropped(typeof(T), claimed.Path);
+        }
     }
 
     private TimeSpan ComputeBackoff(int attemptCount)

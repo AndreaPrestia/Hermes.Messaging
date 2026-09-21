@@ -121,8 +121,10 @@ public class PersistentMessageStoreTests : IDisposable
     }
 
     [Fact]
-    public void CleanupOldMessages_RemovesOldCompletedAndDeadLettered()
+    public void CleanupOldMessages_RemovesOldCompleted_ButRetainsDeadLettered()
     {
+        // HERMES-003: the durable DLQ is retained until explicit Delete/Purge. Cleanup only
+        // removes old Completed messages; DeadLettered records must survive retention cleanup.
         var recent = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var oldCompleted = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var oldDeadLettered = Guid.CreateVersion7(DateTimeOffset.UtcNow);
@@ -143,10 +145,10 @@ public class PersistentMessageStoreTests : IDisposable
 
         var deletedCount = _store.CleanupOldMessages();
 
-        Assert.Equal(3, deletedCount);
+        Assert.Equal(2, deletedCount); // only the two Completed
         Assert.Null(_store.GetByMessageId(recent));
         Assert.Null(_store.GetByMessageId(oldCompleted));
-        Assert.Null(_store.GetByMessageId(oldDeadLettered));
+        Assert.NotNull(_store.GetByMessageId(oldDeadLettered)); // dead letter retained
         Assert.NotNull(_store.GetByMessageId(oldPending));
     }
 

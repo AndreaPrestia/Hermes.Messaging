@@ -261,6 +261,8 @@ public class DurablePublishTests : IDisposable
 
         public void IncrementAttempt(Guid messageId) { }
 
+        public void DecrementAttempt(Guid messageId) { }
+
         public IEnumerable<PersistedMessage<T>> GetPendingMessages() => [];
 
         public PersistedMessage<T>? TryClaim(Guid messageId) => null;
@@ -276,5 +278,11 @@ public class DurablePublishTests : IDisposable
         public IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now) => [];
 
         public bool ReplayDeadLetter(Guid messageId) => false;
+
+        public IReadOnlyList<PersistedMessage<T>> ListDeadLetters(int skip = 0, int take = 100) => [];
+
+        public bool DeleteDeadLetter(Guid messageId) => false;
+
+        public int PurgeDeadLetters() => 0;
     }
 }

@@ -96,6 +96,7 @@ public static class ChannelSubscriptionExtensions
         services.TryAddSingleton<ChannelRegistry>();
         services.TryAddSingleton<ChannelRouteTable<T>>();
         services.TryAddSingleton<DeadLetterQueueRegistry>();
+        services.TryAddSingleton(TimeProvider.System);
 
         // Auto-register DeadLetterQueue<T> so the subscriber never fails at startup
         services.TryAddSingleton(sp =>
@@ -121,12 +122,17 @@ public static class ChannelSubscriptionExtensions
 
             var safeTypeName = (typeof(T).FullName ?? typeof(T).Name).Replace('.', '_').Replace('+', '_');
             var dbPath = Path.Combine(basePath, $"{safeTypeName}.db");
-            return new PersistentMessageStore<T>(dbPath, completedRetention: TimeSpan.FromDays(7));
+            var timeProvider = sp.GetService<TimeProvider>() ?? TimeProvider.System;
+            return new PersistentMessageStore<T>(dbPath, completedRetention: TimeSpan.FromDays(7), timeProvider: timeProvider);
         });
 
         // Expose the durable store through the storage-agnostic abstraction so the
         // publisher can persist-before-signal without referencing the concrete type.
         services.TryAddSingleton<IMessageStore<T>>(sp => sp.GetRequiredService<PersistentMessageStore<T>>());
+
+        // Durable dead-letter administration surface (List/Get/Replay/Delete/Purge).
+        services.TryAddSingleton<IDeadLetterAdministration<T>>(sp =>
+            new DeadLetterAdministration<T>(sp.GetRequiredService<IMessageStore<T>>()));
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PersistentChannelRouterSubscriber<T>>());
     }
