@@ -1,7 +1,9 @@
 # Changelog
 
-All notable changes to Hermes.Messaging are documented here. This project is in alpha; breaking
-changes are acceptable when required for correctness and are called out explicitly.
+All notable changes to Hermes.Messaging are documented here. Hermes.Messaging is currently in
+**beta**: the public API baseline was frozen at `v0.5.0-beta`. Breaking public API changes during
+beta should be exceptional, explicitly documented, and versioned appropriately (this is beta, not a
+1.0 stability guarantee).
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
@@ -45,9 +47,10 @@ line. This is a metadata/documentation/baseline release — there is **no** runt
 lifecycle, or public-API-shape changes — documentation, CI, and analyzer-baseline bookkeeping only.
 
 ### Changed
-- **PublicAPI baseline semantics corrected.** No analyzer-tracked release has shipped yet (the
-  `PublicApiAnalyzers` guard was introduced in the unpublished `0.4.1-alpha`; the only Git tag is
-  `v0.2.0-alpha`, which predates it). The entire current public API therefore now lives in
+- **PublicAPI baseline semantics corrected.** The analyzer guard was introduced in `0.4.1-alpha`;
+  at that point no analyzer-managed compatibility baseline had yet been promoted to
+  `PublicAPI.Shipped.txt` (the only Git tag was `v0.2.0-alpha`, which predates the analyzer). The
+  entire current public API therefore now lives in
   `src/Hermes.Messaging/PublicAPI.Unshipped.txt`, and `PublicAPI.Shipped.txt` contains only the
   `#nullable enable` header — the conventional "first release pending" model. Nothing is pretended
   to be historically shipped. (The compiled public surface is unchanged; only which baseline file

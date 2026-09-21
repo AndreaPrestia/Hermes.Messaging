@@ -1,6 +1,6 @@
 # 11 — Migration and Compatibility
 
-Breaking alpha changes are acceptable when required for correctness, but must be explicit.
+Since the `v0.5.0-beta` freeze the public API is a tracked compatibility contract. Breaking public API changes must be exceptional, required for correctness, explicit, documented in CHANGELOG/release notes, reflected through `PublicApiAnalyzers` (`PublicAPI.Unshipped.txt`), and versioned appropriately.
 
 Persisted data can be orphaned by:
 - changing CLR-derived file names;

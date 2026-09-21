@@ -55,4 +55,4 @@ Before beta, internalize infrastructure details such as:
 - Channel-specific DLQ internals;
 - circuit breaker implementation.
 
-Alpha is the right time for correctness-driven breaking changes. Never preserve an overload if it implies weaker durability semantics.
+Correctness-driven changes remain the priority, and an overload must never be preserved if it implies weaker durability semantics. However, since the `v0.5.0-beta` freeze the public API is a tracked compatibility contract: breaking public API changes must be exceptional, explicitly justified, documented in CHANGELOG/release notes, reflected through `PublicApiAnalyzers`, and versioned appropriately — not made merely because a refactor would be cleaner.

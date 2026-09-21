@@ -2,11 +2,11 @@
 
 Repository: `https://github.com/AndreaPrestia/Hermes.Messaging`
 
-Audit baseline:
-- branch: `master`
-- commit: `551bcf2791097629f1092a20a6fab3e6dffbdd5b`
+Current compatibility baseline:
+- tag: `v0.5.0-beta`
+- commit: `9ff5d93e599919aa0d96a318ef751cf494e87cd3`
 
-Before changing code, inspect current HEAD. Code is authoritative for current behavior; these SDDs are authoritative for intended target behavior.
+This tagged beta commit is the **compatibility reference**, not an instruction to work from an old commit. **Before every task, inspect the current HEAD; never assume this documented commit is current HEAD.** Code is authoritative for current behavior; these SDDs are authoritative for intended target behavior.
 
 ## Reading order
 Read `sdd/00-overview.md` through `sdd/14-open-questions.md`, then execute only the requested file under `tasks/`.
@@ -14,7 +14,14 @@ Read `sdd/00-overview.md` through `sdd/14-open-questions.md`, then execute only 
 ## Product rules
 Hermes remains an in-process, single-process/single-instance .NET 10 message bus with local durability. Do not turn it into RabbitMQ, Azure Service Bus, Kafka, MassTransit, NServiceBus, Redis Streams, a remote transport, or a distributed broker.
 
-Correctness beats compatibility during alpha.
+Correctness remains the highest priority. Starting with `v0.5.0-beta`, the public API is a tracked compatibility contract. Breaking public API changes must be exceptional, explicitly justified, documented in CHANGELOG/release notes, reflected through `PublicApiAnalyzers`, and accompanied by an appropriate versioning decision. Do not break the shipped API merely because a refactor would be cleaner.
+
+## Public API contract
+The public surface is guarded by `Microsoft.CodeAnalysis.PublicApiAnalyzers`:
+- `src/Hermes.Messaging/PublicAPI.Shipped.txt` = the beta compatibility floor.
+- `src/Hermes.Messaging/PublicAPI.Unshipped.txt` = deliberate API changes made after the beta freeze.
+
+Rules: never delete a shipped API entry just to silence the analyzer; record new API in `PublicAPI.Unshipped.txt`; breaking changes require explicit justification; do not weaken RS0016/RS0017; prefer internal refactors that leave the public surface unchanged. See `docs/api/public-api-review.md` for the full baseline workflow.
 
 ## Core invariant
 If `PublishAsync` returns an accepted result, the message has already been durably committed.
@@ -25,13 +32,16 @@ Duplicates are possible. Never claim exactly-once.
 
 ## Working method
 For each phase:
-1. inspect current code;
-2. add characterization/failing tests;
-3. implement the smallest coherent change;
-4. run targeted tests;
-5. run the full suite;
-6. update only docs affected by the semantic change;
-7. stop at the phase boundary.
+1. inspect current HEAD;
+2. inspect relevant SDD/docs;
+3. characterize current behavior (add/adjust tests);
+4. before changing any public type/member, inspect `PublicAPI.Shipped.txt`;
+5. implement the smallest coherent change;
+6. run targeted tests;
+7. run the full build/suite;
+8. inspect the public API analyzer delta — verify `PublicAPI.Unshipped.txt` contains only intentional deltas;
+9. update only docs affected by the change;
+10. stop at the task boundary.
 
 Do not jump ahead because a larger refactor feels cleaner.
 
