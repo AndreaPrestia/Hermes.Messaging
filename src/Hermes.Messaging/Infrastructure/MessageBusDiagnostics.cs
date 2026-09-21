@@ -37,6 +37,8 @@ internal sealed class MessageBusDiagnostics : IMessageBusDiagnostics
 
     public bool IsReady => _runtimeState.IsReady && _readiness.RecoveryComplete;
 
+    public RuntimeState CurrentState => _runtimeState.Current;
+
     public int GetBacklogCount<T>()
     {
         // Durable backlog: work that still needs doing, from the store — NOT Channel enqueue/

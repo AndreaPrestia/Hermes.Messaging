@@ -5,6 +5,48 @@ changes are acceptable when required for correctness and are called out explicit
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0-alpha] — 2026-09-21
+
+**Breaking public-API cleanup** in preparation for the future `0.5.0-beta` API freeze. No messaging
+architecture, delivery-semantics, retry, DLQ, reconciliation, lifecycle, persistence, or benchmark
+behavior changed — this pass only reduces the public surface to the intended consumer API plus one
+additive read-only diagnostics member.
+
+### Added
+- `IMessageBusDiagnostics.CurrentState` — read-only observation of the lifecycle `RuntimeState`
+  (replaces any need for the now-internal, mutable `HermesRuntimeState`).
+- **Public API surface guard:** `docs/api/PublicAPI.txt` baseline + `PublicApiSurfaceTests`, a
+  reflection snapshot that fails CI on any accidental public-surface change until a maintainer
+  regenerates the baseline (`HERMES_UPDATE_PUBLIC_API=1`) and reviews the diff.
+- Package smoke test expanded to exercise diagnostics (`IsReady`/`IsHealthy`/`CurrentState`),
+  `NonRetryableException` dead-lettering, and the full `IDeadLetterAdministration<T>` surface
+  (List/Get/Replay/Purge) — all through the packed NuGet's public API only.
+
+### Changed (BREAKING — implementation types are now `internal`)
+The following are no longer part of the public API. They were never a supported extension point;
+consumers interact through registration extensions, `IMessageBus`, `IMessageBusDiagnostics`,
+`IDeadLetterAdministration<T>`, the handler/DLQ contracts, telemetry constants, and the public
+exceptions/models:
+
+- Storage: `IMessageStore<T>`, `PersistentMessageStore<T>`, `PersistedMessage<T>`,
+  `ChannelMessage<T>`, `MessageStatus`, `PersistedMessageSchema`.
+- Routing/hosted: `PersistentChannelRouterSubscriber<T>`, `ChannelRouteRegistration<T>`,
+  `ChannelRegistry`, `ChannelRouteTable<T>`, `InMemoryMessageBus`.
+- Dead-letter internals: `DeadLetterQueue<T>`, `DeadLetterQueueRegistry`,
+  `DeadLetterQueueProcessor`, `IDeadLetterQueue`, `DeadLetterReadResult`, and the concrete
+  `DeadLetterAdministration<T>` (the `IDeadLetterAdministration<T>` interface stays public).
+- Lifecycle/telemetry/retry internals: `HermesRuntimeState` (incl. `Set`/`TryTransition`),
+  `HermesReadiness`, `HermesStoreMetrics`, `RetryClassifier`, `FailureDisposition`.
+
+Version bumped to `0.4.0-alpha`. Still alpha — the public API may change again before `0.5.0-beta`.
+
+### Notes
+- `StoreSchemaMismatchException` stays **public** (can escape host startup; operators may catch it).
+- License/authors metadata discrepancy (LICENSE `Kakama` vs NuGet `<Authors>` Andrea Prestia) is
+  still **unresolved** — requires a maintainer decision before public package release. Unchanged.
+- Deferred to beta: namespace polish (consumer APIs currently under `Hermes.Messaging.Infrastructure`;
+  `StoreSchemaMismatchException` under `Hermes.Messaging.Domain.Entities`).
+
 ## [0.3.0-alpha] — 2026-09-21
 
 Maturity / beta-preparation pass. No messaging-architecture changes: benchmarks found no

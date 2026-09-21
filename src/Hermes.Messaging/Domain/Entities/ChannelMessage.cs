@@ -10,7 +10,7 @@ namespace Hermes.Messaging.Domain.Entities;
 /// Never use <see cref="CorrelationId"/> as a unique persistence key.
 /// </remarks>
 /// <typeparam name="T">Payload type.</typeparam>
-public sealed record ChannelMessage<T>(string Path, T Body, Guid CorrelationId, Guid MessageId)
+internal sealed record ChannelMessage<T>(string Path, T Body, Guid CorrelationId, Guid MessageId)
 {
     /// <summary>
     /// Backwards-friendly constructor that generates a fresh unique <see cref="MessageId"/>.

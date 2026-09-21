@@ -7,7 +7,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Stores the route handlers for a specific message type.
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class ChannelRouteTable<T>
+internal sealed class ChannelRouteTable<T>
 {
     private readonly ConcurrentDictionary<string, Func<T, IServiceProvider, CancellationToken, Task>> _routes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<ChannelRouteTable<T>>? _logger;

@@ -1,98 +1,156 @@
-# Public API Review — 0.3.0-alpha (beta preparation)
+# Public API Review — 0.4.0-alpha (breaking API cleanup)
 
-This document inventories the externally visible API of `Hermes.Messaging` and classifies each
-public type as one of:
+This document inventories the externally visible API of `Hermes.Messaging` after the `0.4.0-alpha`
+public-API cleanup and classifies each type as one of:
 
-- **KEEP** — intended, stable public surface.
-- **OBSOLETE** — kept for compatibility; slated for removal.
-- **INTERNALIZE-BEFORE-BETA** — implementation detail that is currently public and should become
-  `internal` before the beta API freeze, once we confirm no intended consumer depends on it.
-- **NEEDS-DESIGN** — public but its shape/exposure needs a deliberate decision before beta.
+- **KEEP** — intended, supported public surface.
+- **INTERNALIZE** — implementation detail; made `internal` in this pass.
+- **OBSOLETE** — kept public for compatibility but marked `[Obsolete]`.
+- **REDESIGN** — public shape needs a deliberate change (recorded, may be deferred).
 
-The test project uses `[InternalsVisibleTo]`, so internalizing a type does **not** break tests.
-External consumers are validated separately by the package smoke test (`tests/PackageSmokeTest`),
-which only compiles against the shipped NuGet package's public surface.
+The machine-readable snapshot of the resulting public surface is checked in at
+[`docs/api/PublicAPI.txt`](PublicAPI.txt) and asserted by `PublicApiSurfaceTests`. Any accidental
+addition/removal/change of a public type or member fails that test until a maintainer deliberately
+regenerates the baseline (env var `HERMES_UPDATE_PUBLIC_API=1`) and reviews the diff.
 
-## Actions taken in this pass
+The test project uses `[InternalsVisibleTo]`, and the benchmark project (which seeds the durable
+store directly as internal tooling) does too — so internalizing a type does **not** break tests or
+benchmarks. External consumers are validated by the package smoke test
+(`tests/Hermes.Messaging.PackageSmokeTest`), which compiles only against the shipped package's
+public surface.
 
-**No types were internalized in this pass.** An initial attempt to internalize the two clearly-
-internal helpers (`ChannelRouteRegistration<T>`, `HermesStoreMetrics`) failed to compile: both are
-constructor parameters of the **public** `PersistentChannelRouterSubscriber<T>` hosted service
-(CS0051 — a public member cannot expose a less-accessible parameter type). That proves these types
-cannot be internalized in isolation: the whole registration/subscriber/store graph must be
-internalized together as one coordinated breaking change. Per the task ("do not mass-internalize
-automatically; document ambiguous cases"), that work is deferred to a dedicated pre-beta task and
-documented below. XML doc comments now flag both as `INTERNALIZE-BEFORE-BETA`.
+---
 
-## Classification
+## KEEP — intended public consumer surface
 
-### Core public contract — KEEP
+| Namespace.Type | Why a consumer needs it |
+|----------------|-------------------------|
+| `Hermes.Messaging.Infrastructure.IMessageBus` | The publish entry point. |
+| `Hermes.Messaging.Infrastructure.PublishOptions` | Publish input (correlation id). |
+| `Hermes.Messaging.Infrastructure.PublishResult` | Publish output (durable acceptance proof). |
+| `Hermes.Messaging.Infrastructure.MessageBusOptions` | Configuration (`AddHermesMessaging(configure)`). |
+| `Hermes.Messaging.Infrastructure.DependencyInjection` | `AddHermesMessaging`, `AddDeadLetterQueue<T>`. |
+| `Hermes.Messaging.Infrastructure.ChannelSubscriptionExtensions` | `Subscribe`/`AddSubscription`/`AddChannelSubscription`/`SubscribeAsync`. |
+| `Hermes.Messaging.Infrastructure.ChannelSubscriptionBuilder<T>` | Fluent `WithDeadLetterHandler<THandler>()`. |
+| `Hermes.Messaging.Infrastructure.IDeadLetterAdministration<T>` | Durable DLQ admin (List/Get/Replay/Delete/Purge). |
+| `Hermes.Messaging.Infrastructure.DeadLetterEntry<T>` | Read model returned by the admin API. |
+| `Hermes.Messaging.Infrastructure.IDeadLetterHandler<T>` | Consumer-implemented DLQ observer. |
+| `Hermes.Messaging.Infrastructure.DeadLetterMessage<T>` | Passed to `IDeadLetterHandler<T>`. |
+| `Hermes.Messaging.Infrastructure.IMessageBusDiagnostics` | Liveness/readiness/state + durable backlog/stats. |
+| `Hermes.Messaging.Infrastructure.MessageStoreStats` | Projection returned by `GetStoreStats<T>()`. |
+| `Hermes.Messaging.Infrastructure.RuntimeState` | Enum observed via `IMessageBusDiagnostics.CurrentState`. |
+| `Hermes.Messaging.Infrastructure.NonRetryableException` | Handlers throw it to dead-letter immediately. |
+| `Hermes.Messaging.Infrastructure.RouteNotFoundException` | Can escape publish; consumers may catch. |
+| `Hermes.Messaging.Infrastructure.HermesNotReadyException` | Can escape publish-before-ready; consumers may catch. |
+| `Hermes.Messaging.Domain.Entities.StoreSchemaMismatchException` | Can escape host startup; operators may catch. |
+| `Hermes.Messaging.Infrastructure.HermesTelemetry` | `ActivitySource`/meter name for OpenTelemetry wiring. |
 
-| Type | Notes |
-|------|-------|
-| `IMessageBus` | Primary publish API. |
-| `PublishOptions` | Publish input (CorrelationId). |
-| `PublishResult` | Publish output (MessageId/CorrelationId/AcceptedAt). |
-| `IMessageBusDiagnostics` | Liveness/readiness/backlog/stats. |
-| `IDeadLetterAdministration<T>` | Durable DLQ admin (List/Get/Replay/Delete/Purge). |
-| `DeadLetterEntry<T>` | DLQ read model. |
-| `MessageBusOptions` | Configuration. |
-| `DependencyInjection` (`AddHermesMessaging`) | Registration entry point. |
-| `ChannelSubscriptionExtensions` (`Subscribe`/`AddSubscription`/`AddChannelSubscription`) | Subscription registration. |
-| `ChannelSubscriptionBuilder<T>` | Fluent subscription config (`WithDeadLetterHandler`). |
-| `IDeadLetterHandler<T>` | Consumer-implemented observer hook. |
-| `RetryClassifier`, `FailureDisposition`, `NonRetryableException` | Retry classification consumers rely on (throwing `NonRetryableException`). |
-| `RouteNotFoundException` | Thrown to callers on unknown route. |
-| `HermesNotReadyException`, `RuntimeState` | Publish-gating exception + observable state. |
-| `HermesRuntimeState` | Observable runtime state (resolvable). NEEDS-DESIGN candidate — see below. |
-| `MessageStatus` | Durable state enum surfaced via stats/entries. |
-| `HermesTelemetry` | Stable meter/ActivitySource **names** are the contract; exposing the static as public is convenient for consumers wiring OpenTelemetry. |
-| `MessageStoreStats` | Returned by diagnostics. |
+### Additive change in this pass
+- `IMessageBusDiagnostics.CurrentState` (get-only `RuntimeState`) was **added** so consumers can
+  observe lifecycle state without the (now-internal) mutable `HermesRuntimeState` holder.
 
-### KEEP but review naming/shape — NEEDS-DESIGN
+---
 
-| Type | Concern |
-|------|---------|
-| `HermesRuntimeState` | Public mutable state holder (`Set`, `TryTransition`) is broader than consumers need; consider exposing a read-only `RuntimeState Current` via diagnostics only. |
-| `HermesReadiness` | Public but is an internal coordination primitive; readiness is already surfaced via `IMessageBusDiagnostics.IsReady`. Candidate to internalize once confirmed no consumer resolves it directly. |
-| `IDeadLetterQueue` / `DeadLetterReadResult` | Non-generic polymorphic access used by the processor; unclear if consumers need it. |
-| `PersistedMessageSchema` | Public constant for schema version; keep but document as informational. |
+## INTERNALIZE — made `internal` in this pass
 
-### Implementation details — INTERNALIZE-BEFORE-BETA
+Verified by real usage: none of these are referenced by the package smoke test or the crash harness
+(consumers see only public API). Tests/benchmarks that touch them rely on `[InternalsVisibleTo]`,
+which is **not** a reason to keep a type public.
 
-These are public today but are implementation types that intended consumers should not use
-directly. They are **not** internalized in this pass because DI registration, diagnostics, and the
-current test suite resolve some of them by concrete type; internalizing requires a coordinated
-change and is a breaking API change best done as its own step.
+| Namespace.Type | Public contract that replaces direct consumer access |
+|----------------|------------------------------------------------------|
+| `Infrastructure.PersistentChannelRouterSubscriber<T>` | Hosted service; wired by `AddChannelSubscription<T>`. **Linchpin** — internalizing it unblocked its whole ctor-parameter graph. |
+| `Infrastructure.ChannelRouteRegistration<T>` | DI wiring detail. |
+| `Infrastructure.ChannelRegistry` | Wake-up channel pool. |
+| `Infrastructure.ChannelRouteTable<T>` | Route→handler dispatch. |
+| `Infrastructure.HermesStoreMetrics` | Telemetry gauge registry; metrics exposed via `HermesTelemetry`. |
+| `Infrastructure.HermesReadiness` | Readiness coordination; observed via `IMessageBusDiagnostics.IsReady`. |
+| `Infrastructure.HermesRuntimeState` (incl. `Set`/`TryTransition`/`EnsureReady`) | State observed via `IMessageBusDiagnostics.CurrentState`/`IsReady`; mutation is runtime-only. |
+| `Infrastructure.InMemoryMessageBus` | Consumers use `IMessageBus`. |
+| `Infrastructure.PersistentMessageStore<T>` | Durable store; access via diagnostics/admin projections. |
+| `Infrastructure.IMessageStore<T>` | Storage abstraction — **not** a supported extension point (see Storage decision). |
+| `Infrastructure.DeadLetterQueue<T>` | Observer channel; consumers use `IDeadLetterHandler<T>`/admin. |
+| `Infrastructure.DeadLetterQueueRegistry` | Observer registry. |
+| `Infrastructure.DeadLetterQueueProcessor` | Hosted service draining observers. |
+| `Infrastructure.DeadLetterAdministration<T>` (concrete) | Consumers use the `IDeadLetterAdministration<T>` interface. |
+| `Infrastructure.RetryClassifier` | Retry classification is runtime-internal. |
+| `Infrastructure.FailureDisposition` (enum) | Result of internal classification. |
+| `Domain.Interfaces.IDeadLetterQueue` | Internal observer abstraction. |
+| `Domain.Entities.DeadLetterReadResult` | Internal observer read result. |
+| `Domain.Entities.ChannelMessage<T>` | Internal envelope. |
+| `Domain.Entities.PersistedMessage<T>` | Internal durable entity. |
+| `Domain.Entities.MessageStatus` (enum) | Internal durable-state enum (was only in `IMessageStore<T>` signatures). |
+| `Domain.Entities.PersistedMessageSchema` | Internal durable-format version constant. |
 
-| Type | Why public today | Target |
-|------|------------------|--------|
-| `ChannelRouteRegistration<T>` | DI-time wiring; ctor parameter of the public subscriber. | `internal` (with the subscriber). |
-| `HermesStoreMetrics` | Telemetry gauge registry; ctor parameter of the public subscriber. | `internal` (with the subscriber). |
-| `PersistentMessageStore<T>` | Registered as concrete singleton; tests resolve it directly. | `internal` (expose only via `IMessageStore<T>`/diagnostics). |
-| `IMessageStore<T>` | Storage abstraction; only one production impl. | Keep public **only if** a pluggable store is a goal; otherwise internalize. Currently NEEDS-DESIGN. |
-| `ChannelRegistry` | Wake-up channel pool. | `internal`. |
-| `ChannelRouteTable<T>` | Route→handler dispatch table. | `internal`. |
-| `PersistentChannelRouterSubscriber<T>` | Hosted service. | `internal`. |
-| `DeadLetterQueue<T>` | Best-effort observer channel. | `internal` (consumers use `IDeadLetterHandler<T>` / admin). |
-| `DeadLetterQueueRegistry` | Observer channel registry. | `internal`. |
-| `DeadLetterQueueProcessor` | Hosted service. | `internal`. |
-| `DeadLetterMessage<T>` | Passed to `IDeadLetterHandler<T>` — **must stay public** (consumer-facing). | KEEP. |
-| `ChannelMessage<T>` | Internal envelope. | `internal`. |
-| `PersistedMessage<T>` | Durable entity. | `internal` (read models like `DeadLetterEntry<T>`/`MessageStoreStats` are the public projections). |
-| `HermesRuntimeState.Set/TryTransition` | Mutation surface. | Reduce to read-only public view. |
+---
 
-### Already internal (correct)
+## OBSOLETE
 
-`ChannelMetrics`, `TypeIdentity`, `HermesLifecycle`, `MessageBusDiagnostics` (impl).
+| Member | Note |
+|--------|------|
+| `MessageBusOptions.MaxRetryAttempts` | Already `[Obsolete]`; alias of `MaxAttempts` (total handler invocations). Kept for alpha compatibility. Still appears in the public baseline until removed at beta. |
 
-> Note: `ChannelRouteRegistration<T>` and `HermesStoreMetrics` are **still `public`** (see the
-> INTERNALIZE-BEFORE-BETA table above). They are coupled to the public
-> `PersistentChannelRouterSubscriber<T>` constructor, so they can only be internalized as part of
-> the coordinated pre-beta breaking change — they were **not** internalized in the 0.3.0-alpha pass.
+No new obsoletes were introduced: the registration extensions (`Subscribe`, `AddSubscription`,
+`AddChannelSubscription`, `SubscribeAsync`) are genuinely distinct entry points (host-builder vs
+service-collection; fluent vs terminal), not redundant aliases, so none were deprecated (avoiding
+churn without clear value).
 
-## Recommendation
+---
 
-Perform the `INTERNALIZE-BEFORE-BETA` group as a single, clearly-labelled breaking change in a
-dedicated task before `0.5.0-beta`, together with the package smoke test as the guardrail for the
-intended public surface. Do not mass-internalize piecemeal across releases.
+## REDESIGN (recorded; deferred to beta)
+
+| Item | Problem | Decision |
+|------|---------|----------|
+| `StoreSchemaMismatchException` namespace | Lives in `Hermes.Messaging.Domain.Entities` while all other consumer exceptions are in `Hermes.Messaging.Infrastructure`. | Kept public (operators may catch it) but the namespace is a wart. Moving it is a breaking change; deferred to the beta namespace-polish pass to avoid piecemeal churn now. |
+| Consumer namespaces | Core consumer APIs live in `Hermes.Messaging.Infrastructure`, which reads like an implementation namespace. | Deferred: a namespace migration (`Hermes.Messaging` / `.DeadLetters` / `.Diagnostics`) would be broad and breaking; documented as a beta item rather than combined blindly with internalization. |
+
+---
+
+## Storage abstraction decision (Phase C)
+
+`IMessageStore<T>` and its concrete `PersistentMessageStore<T>` are **internalized**. Hermes does
+**not** promise pluggable/alternate persistence providers, and no storage-provider plugin system was
+introduced. The persisted entity types (`PersistedMessage<T>`, `ChannelMessage<T>`) and the durable
+status enum (`MessageStatus`) disappear from the consumer surface with it. Diagnostics
+(`MessageStoreStats` via `IMessageBusDiagnostics.GetStoreStats<T>()`) and dead-letter administration
+(`IDeadLetterAdministration<T>`) remain the supported durable-state projections.
+
+## Runtime state decision (Phase D)
+
+`HermesRuntimeState` (and its mutating `Set`/`TryTransition`) is **internalized**. Consumers can now
+**observe** the lifecycle read-only via the new `IMessageBusDiagnostics.CurrentState`, plus the
+existing `IsReady`/`IsHealthy`. No new lifecycle abstraction was introduced.
+
+## Readiness decision (Phase E)
+
+`HermesReadiness` is **internalized** (internal recovery/lifecycle coordination). Readiness remains
+exposed through `IMessageBusDiagnostics.IsReady`.
+
+## Retry API decision (Phase H)
+
+`NonRetryableException` stays **public** (handlers throw it). `RetryClassifier` and
+`FailureDisposition` are **internalized** — no consumer calls `Classify`; they are runtime
+implementation details (tests exercise them via `[InternalsVisibleTo]`, which is not a reason to
+keep them public).
+
+## Dead-letter API decision (Phase F)
+
+**KEEP public:** `IDeadLetterAdministration<T>`, `DeadLetterEntry<T>`, `IDeadLetterHandler<T>`,
+`DeadLetterMessage<T>`. **INTERNALIZE:** `DeadLetterQueue<T>`, `DeadLetterQueueRegistry`,
+`DeadLetterQueueProcessor`, `IDeadLetterQueue`, `DeadLetterReadResult`, and the concrete
+`DeadLetterAdministration<T>`. Consumers manage durable dead letters through the administration
+interface, not the observer-channel implementation.
+
+## Persistence schema API decision (Phase G)
+
+- `MessageStatus` — **internalized** (only appeared in the now-internal `IMessageStore<T>`
+  signatures; `DeadLetterEntry<T>` does not expose it).
+- `PersistedMessageSchema` — **internalized** (internal durable-format logic only).
+- `StoreSchemaMismatchException` — **kept public** (it can escape host startup and operators may
+  reasonably identify it programmatically). No persisted entity type is exposed because of it.
+
+## Namespace decision (Phase J)
+
+No namespace migration was performed. The priority was removing accidental public surface, not
+aesthetic renaming. A namespace migration would be broad and breaking; it is documented above under
+REDESIGN as a deferred beta item.

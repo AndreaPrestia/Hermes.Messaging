@@ -7,7 +7,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Dead Letter Queue for messages that failed after max retry attempts.
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class DeadLetterQueue<T> : IDeadLetterQueue
+internal sealed class DeadLetterQueue<T> : IDeadLetterQueue
 {
     private readonly Channel<DeadLetterMessage<T>> _channel;
     

@@ -10,7 +10,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Internal telemetry helper — not part of the intended public consumer surface
 /// (see docs/api/public-api-review.md: INTERNALIZE-BEFORE-BETA).
 /// </summary>
-public sealed class HermesStoreMetrics : IDisposable
+internal sealed class HermesStoreMetrics : IDisposable
 {
     private readonly ConcurrentDictionary<string, Func<MessageStoreStats>> _providers = new();
     private readonly Meter _meter;

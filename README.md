@@ -209,17 +209,17 @@ The channel subscription is registered **immediately** when `Subscribe<T>` is ca
 
 ### What Gets Registered Automatically
 
-Calling `Subscribe<T>` (or `AddChannelSubscription<T>`) auto-registers all required infrastructure for type `T`:
+Calling `Subscribe<T>` (or `AddChannelSubscription<T>`) auto-registers all required infrastructure for type `T`. As of `0.4.0-alpha` **all of these except `IDeadLetterAdministration<T>` are `internal` implementation types** — they are wired up for you and are **not** supported extension points. Consumers interact through the public surface only (see [Public API stability](#public-api-stability)).
 
-| Component | Lifetime | Purpose |
-|-----------|----------|---------|
-| `ChannelRegistry` | Singleton | Bounded channel pool, one per `T` |
-| `ChannelRouteTable<T>` | Singleton | Route → handler mapping |
-| `DeadLetterQueue<T>` | Singleton | Best-effort dead-letter observer channel |
-| `DeadLetterQueueRegistry` | Singleton | Type-keyed registry of all DLQ observers |
-| `PersistentMessageStore<T>` (as `IMessageStore<T>`) | Singleton | LiteDB durable store (source of truth) |
-| `IDeadLetterAdministration<T>` | Singleton | Durable DLQ admin: List/Get/Replay/Delete/Purge |
-| `PersistentChannelRouterSubscriber<T>` | Hosted Service | Fixed worker loops: claim → dispatch |
+| Component | Visibility | Lifetime | Purpose |
+|-----------|-----------|----------|---------|
+| `ChannelRegistry` | internal | Singleton | Bounded channel pool, one per `T` |
+| `ChannelRouteTable<T>` | internal | Singleton | Route → handler mapping |
+| `DeadLetterQueue<T>` | internal | Singleton | Best-effort dead-letter observer channel |
+| `DeadLetterQueueRegistry` | internal | Singleton | Type-keyed registry of all DLQ observers |
+| `PersistentMessageStore<T>` (as `IMessageStore<T>`) | internal | Singleton | LiteDB durable store (source of truth) |
+| `IDeadLetterAdministration<T>` | **public** | Singleton | Durable DLQ admin: List/Get/Replay/Delete/Purge |
+| `PersistentChannelRouterSubscriber<T>` | internal | Hosted Service | Fixed worker loops: claim → dispatch |
 
 ---
 
@@ -480,4 +480,35 @@ For those scenarios, use a real broker. Hermes targets reliable in-process work 
 - Single process / single instance; at-least-once; duplicates possible; not exactly-once.
 - Reconciliation runs on a fixed ~1s interval, which bounds the earliest effective retry.
 - Persisted records carry a `SchemaVersion` (currently 1); cross-version migration is a future concern.
-- Several infrastructure types remain public for now; broad API internalization is deferred.
+
+---
+
+## Public API stability
+
+`0.4.0-alpha` performed a **breaking public-API cleanup**: implementation types (the durable store,
+channel registries/route tables, hosted subscribers, readiness/runtime-state holders, store telemetry
+registries, observer queues, and the persisted-entity types) are now `internal`. A normal consumer
+interacts with Hermes only through:
+
+- **Registration / configuration:** `AddHermesMessaging`, `AddChannelSubscription<T>` / `Subscribe<T>`,
+  `AddDeadLetterQueue<T>`, `ChannelSubscriptionBuilder<T>.WithDeadLetterHandler<THandler>()`,
+  `MessageBusOptions`.
+- **Publishing:** `IMessageBus`, `PublishOptions`, `PublishResult`.
+- **Handling / retry contract:** the handler delegate, `IDeadLetterHandler<T>`, `DeadLetterMessage<T>`,
+  and `NonRetryableException` (throw it from a handler to dead-letter immediately).
+- **Dead-letter administration:** `IDeadLetterAdministration<T>`, `DeadLetterEntry<T>`.
+- **Diagnostics:** `IMessageBusDiagnostics` (`IsReady`, `IsHealthy`, `CurrentState`, `GetBacklogCount<T>`,
+  `GetStoreStats<T>`), `MessageStoreStats`, `RuntimeState`.
+- **Telemetry:** `HermesTelemetry`.
+- **Exceptions that can escape:** `RouteNotFoundException`, `HermesNotReadyException`,
+  `StoreSchemaMismatchException`.
+
+**Supported extension points:** custom message handlers, custom `IDeadLetterHandler<T>` implementations,
+and observing lifecycle/state via `IMessageBusDiagnostics`. **Not supported:** replacing the persistence
+engine, resolving/instantiating any implementation type, or mutating runtime state directly — those are
+internal and may change without notice.
+
+Stability note: **`0.4.x` remains alpha.** The public API may still change before the `0.5.0-beta`
+freeze. Implementation types are not supported extension points. The intended public surface is captured
+in [`docs/api/PublicAPI.txt`](docs/api/PublicAPI.txt) and guarded by an automated surface test, so
+accidental additions fail CI.

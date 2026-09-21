@@ -31,7 +31,7 @@ public enum RuntimeState
 /// Publish is permitted only in <see cref="RuntimeState.Ready"/>. The state is advanced by the
 /// <see cref="HermesLifecycle"/> hosted service.
 /// </remarks>
-public sealed class HermesRuntimeState
+internal sealed class HermesRuntimeState
 {
     private int _state = (int)RuntimeState.Created;
 

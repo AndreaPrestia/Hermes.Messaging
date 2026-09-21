@@ -1,0 +1,119 @@
+TYPE class Hermes.Messaging.Domain.Entities.StoreSchemaMismatchException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+  .ctor(string databasePath, int foundVersion, int supportedVersion)
+  int FoundVersion { get }
+  int SupportedVersion { get }
+  string DatabasePath { get }
+TYPE class Hermes.Messaging.Infrastructure.ChannelSubscriptionBuilder<T>
+  Hermes.Messaging.Infrastructure.ChannelSubscriptionBuilder<T> WithDeadLetterHandler<THandler>()
+TYPE class Hermes.Messaging.Infrastructure.ChannelSubscriptionExtensions
+  static Hermes.Messaging.Infrastructure.ChannelSubscriptionBuilder<T> AddSubscription<T>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, string path, System.Func<T, System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler, System.Action<System.Threading.Channels.BoundedChannelOptions> configure)
+  static Hermes.Messaging.Infrastructure.ChannelSubscriptionBuilder<T> Subscribe<T>(Microsoft.Extensions.Hosting.IHostApplicationBuilder builder, string path, System.Func<T, System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler, System.Action<System.Threading.Channels.BoundedChannelOptions> configure)
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddChannelSubscription<T>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, string path, System.Func<T, System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler)
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddChannelSubscription<T>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, string path, System.Func<T, System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler, System.Action<System.Threading.Channels.BoundedChannelOptions> configure)
+  static Microsoft.Extensions.Hosting.IHostApplicationBuilder SubscribeAsync<T>(Microsoft.Extensions.Hosting.IHostApplicationBuilder builder, string path, System.Func<T, System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler)
+  static Microsoft.Extensions.Hosting.IHostApplicationBuilder SubscribeAsync<T>(Microsoft.Extensions.Hosting.IHostApplicationBuilder builder, string path, System.Func<T, System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task> handler, System.Action<System.Threading.Channels.BoundedChannelOptions> configure)
+TYPE class Hermes.Messaging.Infrastructure.DeadLetterEntry<T> : System.IEquatable<Hermes.Messaging.Infrastructure.DeadLetterEntry<T>>
+  .ctor()
+  Hermes.Messaging.Infrastructure.DeadLetterEntry<T> <Clone>$()
+  System.DateTimeOffset CreatedAt { get; init }
+  System.DateTimeOffset DeadLetteredAt { get; init }
+  System.Guid CorrelationId { get; init }
+  System.Guid MessageId { get; init }
+  T Body { get; init }
+  bool Equals(Hermes.Messaging.Infrastructure.DeadLetterEntry<T> other)
+  bool Equals(object obj)
+  int AttemptCount { get; init }
+  int GetHashCode()
+  string LastError { get; init }
+  string Route { get; init }
+  string ToString()
+TYPE class Hermes.Messaging.Infrastructure.DeadLetterMessage<T> : System.IEquatable<Hermes.Messaging.Infrastructure.DeadLetterMessage<T>>
+  .ctor(string Path, T Body, System.Exception Exception, int Attempts, System.Guid CorrelationId, System.DateTimeOffset FailedAt)
+  Hermes.Messaging.Infrastructure.DeadLetterMessage<T> <Clone>$()
+  System.DateTimeOffset FailedAt { get; init }
+  System.Exception Exception { get; init }
+  System.Guid CorrelationId { get; init }
+  T Body { get; init }
+  bool Equals(Hermes.Messaging.Infrastructure.DeadLetterMessage<T> other)
+  bool Equals(object obj)
+  int Attempts { get; init }
+  int GetHashCode()
+  string Path { get; init }
+  string ToString()
+  void Deconstruct(out string Path, out T Body, out System.Exception Exception, out int Attempts, out System.Guid CorrelationId, out System.DateTimeOffset FailedAt)
+TYPE class Hermes.Messaging.Infrastructure.DependencyInjection
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDeadLetterQueue<T>(Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHermesMessaging(Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHermesMessaging(Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Hermes.Messaging.Infrastructure.MessageBusOptions> configure)
+TYPE class Hermes.Messaging.Infrastructure.HermesNotReadyException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+  .ctor(Hermes.Messaging.Infrastructure.RuntimeState state)
+  Hermes.Messaging.Infrastructure.RuntimeState State { get }
+TYPE class Hermes.Messaging.Infrastructure.HermesTelemetry
+  const string Name
+  static readonly System.Diagnostics.ActivitySource ActivitySource
+TYPE interface Hermes.Messaging.Infrastructure.IDeadLetterAdministration<T>
+  Hermes.Messaging.Infrastructure.DeadLetterEntry<T> Get(System.Guid messageId)
+  System.Collections.Generic.IReadOnlyList<Hermes.Messaging.Infrastructure.DeadLetterEntry<T>> List(int skip, int take)
+  bool Delete(System.Guid messageId)
+  bool Replay(System.Guid messageId)
+  int Purge()
+TYPE interface Hermes.Messaging.Infrastructure.IDeadLetterHandler<T>
+  System.Threading.Tasks.Task HandleAsync(Hermes.Messaging.Infrastructure.DeadLetterMessage<T> deadLetter, System.Threading.CancellationToken cancellationToken)
+TYPE interface Hermes.Messaging.Infrastructure.IMessageBus
+  System.Threading.Tasks.ValueTask<Hermes.Messaging.Infrastructure.PublishResult> PublishAsync<T>(string route, T message, Hermes.Messaging.Infrastructure.PublishOptions options, System.Threading.CancellationToken cancellationToken)
+TYPE interface Hermes.Messaging.Infrastructure.IMessageBusDiagnostics
+  Hermes.Messaging.Infrastructure.MessageStoreStats GetStoreStats<T>()
+  Hermes.Messaging.Infrastructure.RuntimeState CurrentState { get }
+  bool IsHealthy { get }
+  bool IsReady { get }
+  int GetBacklogCount<T>()
+TYPE class Hermes.Messaging.Infrastructure.MessageBusOptions
+  .ctor()
+  System.TimeSpan ShutdownGracePeriod { get; set }
+  int DefaultChannelCapacity { get; set }
+  int InitialRetryDelayMs { get; set }
+  int MaxAttempts { get; set }
+  int MaxConcurrency { get; set }
+  int MaxRetryAttempts { get; set }
+  string PersistenceBasePath { get; set }
+TYPE class Hermes.Messaging.Infrastructure.MessageStoreStats : System.IEquatable<Hermes.Messaging.Infrastructure.MessageStoreStats>
+  .ctor()
+  Hermes.Messaging.Infrastructure.MessageStoreStats <Clone>$()
+  bool Equals(Hermes.Messaging.Infrastructure.MessageStoreStats other)
+  bool Equals(object obj)
+  int CompletedCount { get; init }
+  int DeadLetteredCount { get; init }
+  int GetHashCode()
+  int PendingCount { get; init }
+  int ProcessingCount { get; init }
+  int RetryScheduledCount { get; init }
+  int TotalCount { get; init }
+  string ToString()
+TYPE class Hermes.Messaging.Infrastructure.NonRetryableException : System.Exception, System.Runtime.Serialization.ISerializable
+  .ctor(string message)
+  .ctor(string message, System.Exception innerException)
+TYPE class Hermes.Messaging.Infrastructure.PublishOptions
+  .ctor()
+  System.Guid? CorrelationId { get; set }
+TYPE class Hermes.Messaging.Infrastructure.PublishResult : System.IEquatable<Hermes.Messaging.Infrastructure.PublishResult>
+  .ctor()
+  Hermes.Messaging.Infrastructure.PublishResult <Clone>$()
+  System.DateTimeOffset AcceptedAt { get; init }
+  System.Guid CorrelationId { get; init }
+  System.Guid MessageId { get; init }
+  bool Equals(Hermes.Messaging.Infrastructure.PublishResult other)
+  bool Equals(object obj)
+  int GetHashCode()
+  string ToString()
+TYPE class Hermes.Messaging.Infrastructure.RouteNotFoundException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+  .ctor(string route, System.Type messageType)
+  System.Type MessageType { get }
+  string Route { get }
+TYPE enum Hermes.Messaging.Infrastructure.RuntimeState : System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
+  const Hermes.Messaging.Infrastructure.RuntimeState Created
+  const Hermes.Messaging.Infrastructure.RuntimeState Faulted
+  const Hermes.Messaging.Infrastructure.RuntimeState Ready
+  const Hermes.Messaging.Infrastructure.RuntimeState Starting
+  const Hermes.Messaging.Infrastructure.RuntimeState Stopped
+  const Hermes.Messaging.Infrastructure.RuntimeState Stopping
+  int value__

@@ -13,7 +13,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Messages are persisted before processing and replayed on startup.
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
+internal sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 {
     private readonly ChannelReader<ChannelMessage<T>> _reader;
     private readonly ChannelRouteTable<T> _routes;

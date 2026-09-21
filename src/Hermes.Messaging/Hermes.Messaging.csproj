@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>Hermes.Messaging</PackageId>
-    <Version>0.3.0-alpha</Version>
+    <Version>0.4.0-alpha</Version>
     <Authors>Andrea Prestia</Authors>
     <Description>In-process, single-process durable message bus for .NET built on System.Threading.Channels with LiteDB persistence. Publish-before-signal durability, a durable state machine with crash recovery, persistent retry with jittered backoff, a durable dead-letter queue, explicit runtime lifecycle, and OpenTelemetry-compatible metrics and tracing (Hermes.Messaging).</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -31,13 +31,25 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Tests exercise internal implementation types directly (state machine, store, registries). -->
     <InternalsVisibleTo Include="Hermes.Messaging.Tests" />
+    <!-- Benchmarks seed the durable store directly for backlog-recovery measurements; they are
+         internal tooling, not a consumer contract, so internal visibility is appropriate. -->
+    <InternalsVisibleTo Include="Hermes.Messaging.Benchmarks" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.5" />
   </ItemGroup>
+
+  <!--
+    Public API surface guard: the intended public API is captured as a checked-in baseline
+    (docs/api/PublicAPI.txt) and asserted by PublicApiSurfaceTests. Any accidental new/changed
+    public type or member fails that test until a maintainer deliberately updates the baseline.
+    A lightweight reflection snapshot was chosen over Microsoft.CodeAnalysis.PublicApiAnalyzers to
+    avoid a prerelease analyzer dependency and a large hand-maintained canonical signature file.
+  -->
 
   <!--
     SourceLink is built into the .NET 10 SDK; with PublishRepositoryUrl + ContinuousIntegrationBuild

@@ -14,7 +14,7 @@ namespace Hermes.Messaging.Domain.Entities;
 /// Processing      -> Pending           (startup interrupted-recovery)
 /// </code>
 /// </remarks>
-public enum MessageStatus
+internal enum MessageStatus
 {
     /// <summary>
     /// Message is durably accepted and waiting to be claimed for processing.
@@ -56,7 +56,7 @@ public enum MessageStatus
 /// Represents a message persisted to storage for crash recovery.
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class PersistedMessage<T>
+internal sealed class PersistedMessage<T>
 {
     /// <summary>
     /// Unique identifier for the persisted message. This is the durable primary key
@@ -126,7 +126,7 @@ public sealed class PersistedMessage<T>
 /// <summary>
 /// Versioning constants for the persisted message schema.
 /// </summary>
-public static class PersistedMessageSchema
+internal static class PersistedMessageSchema
 {
     /// <summary>
     /// Current persisted schema version.

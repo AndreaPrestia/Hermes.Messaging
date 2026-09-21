@@ -9,7 +9,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Enables crash recovery and replay of unprocessed messages.
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
+internal sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
 {
     private readonly LiteDatabase _db;
     private readonly ILiteCollection<PersistedMessage<T>> _messages;

@@ -11,7 +11,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// It is expected to grow (TryClaim, ScheduleRetry, RecoverInterrupted, etc.) in later phases.
 /// </remarks>
 /// <typeparam name="T">Message payload type.</typeparam>
-public interface IMessageStore<T>
+internal interface IMessageStore<T>
 {
     /// <summary>
     /// Durably persists a new message in the <see cref="MessageStatus.Pending"/> state.

@@ -7,7 +7,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Thread-safe registry for all dead letter queues in the system.
 /// Keyed by message type to prevent duplicate registrations.
 /// </summary>
-public sealed class DeadLetterQueueRegistry
+internal sealed class DeadLetterQueueRegistry
 {
     private readonly ConcurrentDictionary<Type, IDeadLetterQueue> _queues = new();
 

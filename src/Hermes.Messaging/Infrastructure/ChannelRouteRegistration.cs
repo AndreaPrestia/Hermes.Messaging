@@ -8,7 +8,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// (see docs/api/public-api-review.md: INTERNALIZE-BEFORE-BETA).
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class ChannelRouteRegistration<T>
+internal sealed class ChannelRouteRegistration<T>
 {
     public ChannelRouteRegistration(
         string path,

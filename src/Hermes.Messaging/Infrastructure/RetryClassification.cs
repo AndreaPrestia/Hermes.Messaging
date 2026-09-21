@@ -3,7 +3,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// <summary>
 /// How a failed processing attempt should be treated by the retry engine.
 /// </summary>
-public enum FailureDisposition
+internal enum FailureDisposition
 {
     /// <summary>Transient failure — schedule another attempt (subject to the attempt limit).</summary>
     Retry,
@@ -28,7 +28,7 @@ public sealed class NonRetryableException : Exception
 /// <summary>
 /// Classifies a handler exception into a <see cref="FailureDisposition"/>.
 /// </summary>
-public static class RetryClassifier
+internal static class RetryClassifier
 {
     /// <summary>
     /// Classifies <paramref name="exception"/>. Shutdown cancellation is only reported when the

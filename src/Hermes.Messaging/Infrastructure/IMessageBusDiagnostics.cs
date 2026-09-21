@@ -18,6 +18,13 @@ public interface IMessageBusDiagnostics
     bool IsReady { get; }
 
     /// <summary>
+    /// Read-only observation of the current lifecycle <see cref="RuntimeState"/>. Consumers can
+    /// observe the lifecycle but cannot mutate it — the state is advanced only by the Hermes
+    /// runtime itself.
+    /// </summary>
+    RuntimeState CurrentState { get; }
+
+    /// <summary>
     /// Gets the durable backlog for a message type: the number of messages that still require
     /// work, defined as <c>Pending + Processing + RetryScheduled</c>. Dead-lettered messages are
     /// NOT counted here. Returns 0 if the store is unavailable (e.g. no subscriptions).

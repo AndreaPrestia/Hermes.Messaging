@@ -9,7 +9,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Readiness (for liveness/readiness probes) requires the runtime to be <see cref="RuntimeState.Ready"/>
 /// AND every registered subscriber to have completed its startup recovery (SDD 09).
 /// </remarks>
-public sealed class HermesReadiness
+internal sealed class HermesReadiness
 {
     private readonly ConcurrentDictionary<string, bool> _recovered = new();
 

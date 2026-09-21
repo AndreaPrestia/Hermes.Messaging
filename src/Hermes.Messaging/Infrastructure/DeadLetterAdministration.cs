@@ -46,7 +46,7 @@ public interface IDeadLetterAdministration<T>
 /// Store-backed implementation of <see cref="IDeadLetterAdministration{T}"/>.
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
-public sealed class DeadLetterAdministration<T> : IDeadLetterAdministration<T>
+internal sealed class DeadLetterAdministration<T> : IDeadLetterAdministration<T>
 {
     private readonly IMessageStore<T> _store;
 

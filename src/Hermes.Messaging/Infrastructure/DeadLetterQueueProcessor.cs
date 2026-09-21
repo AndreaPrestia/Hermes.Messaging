@@ -20,7 +20,7 @@ public interface IDeadLetterHandler<T>
 /// Single background service that processes all dead letter queues registered in the system.
 /// Polls all queues and dispatches to registered handlers based on message type.
 /// </summary>
-public sealed class DeadLetterQueueProcessor : BackgroundService
+internal sealed class DeadLetterQueueProcessor : BackgroundService
 {
     private readonly DeadLetterQueueRegistry _registry;
     private readonly IServiceScopeFactory _scopeFactory;

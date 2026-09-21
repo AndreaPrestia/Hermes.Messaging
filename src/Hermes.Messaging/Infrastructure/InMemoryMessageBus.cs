@@ -22,7 +22,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// A lost channel signal never loses an accepted message — the durable store is the
 /// source of truth and the message is replayed on restart.
 /// </remarks>
-public sealed class InMemoryMessageBus : IMessageBus
+internal sealed class InMemoryMessageBus : IMessageBus
 {
     private readonly ChannelRegistry _registry;
     private readonly IServiceProvider _services;

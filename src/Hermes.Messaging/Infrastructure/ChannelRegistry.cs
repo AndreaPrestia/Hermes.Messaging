@@ -9,7 +9,7 @@ namespace Hermes.Messaging.Infrastructure;
 /// Instance-based channel registry. Registered as a singleton in DI.
 /// Each channel is keyed by its message type.
 /// </summary>
-public sealed class ChannelRegistry
+internal sealed class ChannelRegistry
 {
     private readonly int _defaultCapacity;
     private readonly ConcurrentDictionary<Type, ChannelRegistration> _channels = new();
