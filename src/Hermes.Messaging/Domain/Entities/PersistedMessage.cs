@@ -3,27 +3,53 @@ namespace Hermes.Messaging.Domain.Entities;
 /// <summary>
 /// Status of a persisted message in the store.
 /// </summary>
+/// <remarks>
+/// State machine (single-process):
+/// <code>
+/// Pending         -> Processing -> Completed
+/// Processing      -> RetryScheduled
+/// Processing      -> DeadLettered
+/// RetryScheduled  -> Processing        (when NextAttemptAt is due)
+/// DeadLettered    -> Pending           (explicit replay)
+/// Processing      -> Pending           (startup interrupted-recovery)
+/// </code>
+/// </remarks>
 public enum MessageStatus
 {
     /// <summary>
-    /// Message is waiting to be processed or being processed.
+    /// Message is durably accepted and waiting to be claimed for processing.
     /// </summary>
     Pending = 0,
-    
+
     /// <summary>
     /// Message was processed successfully.
     /// </summary>
     Completed = 1,
-    
+
     /// <summary>
-    /// Message failed after all retry attempts.
+    /// Retired ambiguous state. No longer written by Hermes; retained only so that
+    /// databases created before HERMES-002 can still deserialize. Treated as interrupted
+    /// work and recovered to <see cref="Pending"/> on startup.
     /// </summary>
+    [Obsolete("Retired in HERMES-002. Use RetryScheduled/Processing. Kept only for backward deserialization.")]
     Failed = 2,
-    
+
     /// <summary>
-    /// Message is in the dead letter queue.
+    /// Message is in the dead letter queue (durable).
     /// </summary>
-    DeadLettered = 3
+    DeadLettered = 3,
+
+    /// <summary>
+    /// Message has been claimed by a worker and is currently being processed.
+    /// Recovered to <see cref="Pending"/> on startup if the process was interrupted.
+    /// </summary>
+    Processing = 4,
+
+    /// <summary>
+    /// Message failed a processing attempt and is scheduled for a future retry at
+    /// <see cref="PersistedMessage{T}.NextAttemptAt"/>.
+    /// </summary>
+    RetryScheduled = 5
 }
 
 /// <summary>
@@ -78,9 +104,15 @@ public sealed class PersistedMessage<T>
     /// When the message status was last updated.
     /// </summary>
     public DateTimeOffset UpdatedAt { get; set; }
-    
+
     /// <summary>
-    /// Last error message if failed.
+    /// The earliest time a <see cref="MessageStatus.RetryScheduled"/> message becomes due
+    /// for another attempt. Null when not scheduled for retry.
+    /// </summary>
+    public DateTimeOffset? NextAttemptAt { get; set; }
+
+    /// <summary>
+    /// Last error message if a processing attempt failed.
     /// </summary>
     public string? LastError { get; set; }
 }

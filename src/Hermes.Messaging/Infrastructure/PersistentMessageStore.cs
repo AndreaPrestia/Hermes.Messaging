@@ -53,7 +53,8 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
             Status = MessageStatus.Pending,
             AttemptCount = 0,
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
+            NextAttemptAt = null
         };
 
         lock (_writeLock)
@@ -117,6 +118,147 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
     }
 
     /// <summary>
+    /// Atomically claims a claimable message and transitions it to Processing.
+    /// </summary>
+    public PersistedMessage<T>? TryClaim(Guid messageId)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return null;
+
+            var message = _messages.FindOne(x => x.MessageId == messageId);
+            if (message is null)
+            {
+                return null;
+            }
+
+            var isClaimable =
+                message.Status == MessageStatus.Pending ||
+                (message.Status == MessageStatus.RetryScheduled &&
+                 (message.NextAttemptAt is null || message.NextAttemptAt <= DateTimeOffset.UtcNow));
+
+            if (!isClaimable)
+            {
+                return null;
+            }
+
+            message.Status = MessageStatus.Processing;
+            message.AttemptCount++;
+            message.NextAttemptAt = null;
+            message.UpdatedAt = DateTimeOffset.UtcNow;
+            _messages.Update(message);
+            return message;
+        }
+    }
+
+    /// <summary>
+    /// Transitions a message to Completed.
+    /// </summary>
+    public void MarkCompleted(Guid messageId) => UpdateStatus(messageId, MessageStatus.Completed);
+
+    /// <summary>
+    /// Transitions a message to RetryScheduled with a due time.
+    /// </summary>
+    public void ScheduleRetry(Guid messageId, DateTimeOffset nextAttemptAt, string? error)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return;
+            var message = _messages.FindOne(x => x.MessageId == messageId);
+            if (message != null)
+            {
+                message.Status = MessageStatus.RetryScheduled;
+                message.NextAttemptAt = nextAttemptAt;
+                message.LastError = error;
+                message.UpdatedAt = DateTimeOffset.UtcNow;
+                _messages.Update(message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Transitions a message to DeadLettered.
+    /// </summary>
+    public void MarkDeadLettered(Guid messageId, string? error)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return;
+            var message = _messages.FindOne(x => x.MessageId == messageId);
+            if (message != null)
+            {
+                message.Status = MessageStatus.DeadLettered;
+                message.NextAttemptAt = null;
+                message.LastError = error;
+                message.UpdatedAt = DateTimeOffset.UtcNow;
+                _messages.Update(message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Startup recovery: transitions interrupted work (Processing or retired Failed) to Pending.
+    /// </summary>
+    public int RecoverInterrupted()
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return 0;
+
+#pragma warning disable CS0618 // Failed is retired but old data may still carry it.
+            var interrupted = _messages.Query()
+                .Where(x => x.Status == MessageStatus.Processing || x.Status == MessageStatus.Failed)
+                .ToList();
+#pragma warning restore CS0618
+
+            foreach (var message in interrupted)
+            {
+                message.Status = MessageStatus.Pending;
+                message.NextAttemptAt = null;
+                message.UpdatedAt = DateTimeOffset.UtcNow;
+                _messages.Update(message);
+            }
+
+            return interrupted.Count;
+        }
+    }
+
+    /// <summary>
+    /// Returns Pending messages and due RetryScheduled messages, ordered by creation time.
+    /// </summary>
+    public IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now)
+    {
+        return _messages.Query()
+            .Where(x =>
+                x.Status == MessageStatus.Pending ||
+                (x.Status == MessageStatus.RetryScheduled && x.NextAttemptAt <= now))
+            .OrderBy(x => x.CreatedAt)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Explicitly replays a dead-lettered message back to Pending.
+    /// </summary>
+    public bool ReplayDeadLetter(Guid messageId)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed) return false;
+            var message = _messages.FindOne(x => x.MessageId == messageId);
+            if (message is null || message.Status != MessageStatus.DeadLettered)
+            {
+                return false;
+            }
+
+            message.Status = MessageStatus.Pending;
+            message.NextAttemptAt = null;
+            message.UpdatedAt = DateTimeOffset.UtcNow;
+            _messages.Update(message);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Gets a message by its unique message id.
     /// </summary>
     public PersistedMessage<T>? GetByMessageId(Guid messageId)
@@ -157,8 +299,9 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
         return new MessageStoreStats
         {
             PendingCount = _messages.Count(x => x.Status == MessageStatus.Pending),
+            ProcessingCount = _messages.Count(x => x.Status == MessageStatus.Processing),
+            RetryScheduledCount = _messages.Count(x => x.Status == MessageStatus.RetryScheduled),
             CompletedCount = _messages.Count(x => x.Status == MessageStatus.Completed),
-            FailedCount = _messages.Count(x => x.Status == MessageStatus.Failed),
             DeadLetteredCount = _messages.Count(x => x.Status == MessageStatus.DeadLettered),
             TotalCount = _messages.Count()
         };
@@ -180,8 +323,9 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
 public sealed record MessageStoreStats
 {
     public int PendingCount { get; init; }
+    public int ProcessingCount { get; init; }
+    public int RetryScheduledCount { get; init; }
     public int CompletedCount { get; init; }
-    public int FailedCount { get; init; }
     public int DeadLetteredCount { get; init; }
     public int TotalCount { get; init; }
 }

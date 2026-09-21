@@ -39,4 +39,51 @@ public interface IMessageStore<T>
     /// Gets all pending messages, ordered by creation time, for replay after restart.
     /// </summary>
     IEnumerable<PersistedMessage<T>> GetPendingMessages();
+
+    /// <summary>
+    /// Atomically claims a message for processing. Succeeds only if the message currently
+    /// exists and is claimable (Pending, or RetryScheduled whose NextAttemptAt is due).
+    /// On success it transitions the message to <see cref="MessageStatus.Processing"/>,
+    /// increments the attempt count, and returns the claimed record.
+    /// </summary>
+    /// <returns>The claimed record, or null if the message was not claimable (e.g. already
+    /// Processing/Completed/DeadLettered, missing, or a duplicate signal).</returns>
+    PersistedMessage<T>? TryClaim(Guid messageId);
+
+    /// <summary>
+    /// Transitions a <see cref="MessageStatus.Processing"/> message to
+    /// <see cref="MessageStatus.Completed"/>.
+    /// </summary>
+    void MarkCompleted(Guid messageId);
+
+    /// <summary>
+    /// Transitions a message to <see cref="MessageStatus.RetryScheduled"/> with the given
+    /// due time and error.
+    /// </summary>
+    void ScheduleRetry(Guid messageId, DateTimeOffset nextAttemptAt, string? error);
+
+    /// <summary>
+    /// Transitions a message to <see cref="MessageStatus.DeadLettered"/>.
+    /// </summary>
+    void MarkDeadLettered(Guid messageId, string? error);
+
+    /// <summary>
+    /// Startup recovery: transitions every interrupted message (Processing, or the retired
+    /// Failed state) back to <see cref="MessageStatus.Pending"/> so it can be re-claimed.
+    /// </summary>
+    /// <returns>The number of messages recovered.</returns>
+    int RecoverInterrupted();
+
+    /// <summary>
+    /// Returns messages that are due for processing now: all Pending messages plus any
+    /// RetryScheduled message whose NextAttemptAt is at or before <paramref name="now"/>.
+    /// Ordered by creation time.
+    /// </summary>
+    IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now);
+
+    /// <summary>
+    /// Explicitly replays a dead-lettered message by returning it to
+    /// <see cref="MessageStatus.Pending"/>. Returns false if the message is not dead-lettered.
+    /// </summary>
+    bool ReplayDeadLetter(Guid messageId);
 }

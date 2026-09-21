@@ -1,3 +1,4 @@
+using Hermes.Messaging.Domain.Entities;
 using Hermes.Messaging.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -126,15 +127,12 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
             var bus = host.Services.GetRequiredService<IMessageBus>();
             await bus.PublishAsync("test/fail", new TestMessage("data"));
 
-            // Wait for all retries (3 attempts + delays)
-            await Task.Delay(2000);
+            // Retries are now durable and driven by the reconciliation loop (RetryScheduled ->
+            // due -> re-signal), so wait for the dead letter rather than a fixed delay.
+            var deadLetter = await dlq.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
 
             Assert.Equal(3, attempts); // Max retry attempts
-            
-            var result = await dlq.TryReadAsync();
-            Assert.True(result.Success);
-            
-            var deadLetter = result.Message as DeadLetterMessage<TestMessage>;
+
             Assert.NotNull(deadLetter);
             Assert.Equal("test/fail", deadLetter.Path);
             Assert.Equal(3, deadLetter.Attempts);
@@ -173,20 +171,30 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
             await host.StartAsync();
 
             var bus = host.Services.GetRequiredService<IMessageBus>();
-            
-            // First message will fail and open the circuit
+            var store = host.Services.GetRequiredService<PersistentMessageStore<TestMessage>>();
+
+            // First message will fail and open the circuit.
             await bus.PublishAsync("test/circuit", new TestMessage("first"));
-            await Task.Delay(500);
 
-            // Reset attempts counter
+            // Wait until the circuit is observed open.
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!circuitBreaker.IsOpen("TestMessage:test/circuit") && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+            Assert.True(circuitBreaker.IsOpen("TestMessage:test/circuit"), "Circuit should be open after the first failure.");
+
+            // With the circuit open, a second message must not have its handler invoked.
             attempts = 0;
-
-            // Second message should hit open circuit
-            await bus.PublishAsync("test/circuit", new TestMessage("second"));
+            var second = await bus.PublishAsync("test/circuit", new TestMessage("second"));
             await Task.Delay(500);
 
-            // Circuit breaker should have prevented the handler from being called
             Assert.Equal(0, attempts);
+
+            // And the second message was not completed while the circuit was open.
+            var persistedSecond = store.GetByMessageId(second.MessageId);
+            Assert.NotNull(persistedSecond);
+            Assert.NotEqual(MessageStatus.Completed, persistedSecond.Status);
         }
         finally
         {
@@ -238,10 +246,13 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
     }
 
     [Fact]
-    public async Task DrainPendingMessages_OnShutdown_ProcessesRemainingMessages()
+    public async Task UnprocessedBacklog_OnShutdown_RemainsDurableForRestart()
     {
-        var processedCount = 0;
-        var lockObj = new object();
+        // SDD 06: shutdown does NOT drain the entire backlog. Any message not yet completed
+        // stays durable (Pending / RetryScheduled / Processing) and is recovered on restart —
+        // it must never be silently lost. This replaces the old "drain everything" behavior.
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = 0;
 
         var host = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
@@ -250,14 +261,13 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
                 services.AddDeadLetterQueue<TestMessage>();
                 services.AddChannelSubscription<TestMessage>(
                     "test/drain",
-                    async (message, _, _) =>
+                    async (message, _, ct) =>
                     {
-                        // Simulate slow processing
-                        await Task.Delay(100);
-                        lock (lockObj)
-                        {
-                            processedCount++;
-                        }
+                        Interlocked.Increment(ref started);
+                        // Block so processing cannot finish before we stop the host. A realistic
+                        // handler propagates cancellation (does not swallow it), so the message
+                        // is left non-Completed and recovered on the next start.
+                        await gate.Task.WaitAsync(ct);
                     });
             })
             .Build();
@@ -265,19 +275,28 @@ public class PersistentChannelRouterSubscriberTests : IDisposable
         await host.StartAsync();
 
         var bus = host.Services.GetRequiredService<IMessageBus>();
-        
-        // Enqueue multiple messages quickly
+        var ids = new List<Guid>();
         for (int i = 0; i < 5; i++)
         {
-            await bus.PublishAsync("test/drain", new TestMessage($"message-{i}"));
+            var r = await bus.PublishAsync("test/drain", new TestMessage($"message-{i}"));
+            ids.Add(r.MessageId);
         }
 
-        // Stop immediately
-        await host.StopAsync();
-        host.Dispose();
+        var store = host.Services.GetRequiredService<PersistentMessageStore<TestMessage>>();
 
-        // All messages should have been processed
-        Assert.Equal(5, processedCount);
+        // Stop abruptly while work is blocked. Query the store BEFORE disposing the host,
+        // since the store is a host-owned singleton that is disposed with the host.
+        await host.StopAsync();
+
+        // No message was completed, and none was lost — every one is still durable.
+        foreach (var id in ids)
+        {
+            var persisted = store.GetByMessageId(id);
+            Assert.NotNull(persisted);
+            Assert.NotEqual(MessageStatus.Completed, persisted.Status);
+        }
+
+        host.Dispose();
     }
 
     private sealed record TestMessage(string Value);

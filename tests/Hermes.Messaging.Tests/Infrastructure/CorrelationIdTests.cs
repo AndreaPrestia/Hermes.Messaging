@@ -90,13 +90,10 @@ public class CorrelationIdTests : IDisposable
             var bus = host.Services.GetRequiredService<IMessageBus>();
             await bus.PublishAsync("test/failing", new TestMessage("fail"));
 
-            // Wait for retries and DLQ
-            await Task.Delay(2000);
+            // Retries are durable and paced by the reconciliation loop, so wait for the dead
+            // letter to arrive rather than a fixed delay.
+            var deadLetter = await dlq.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
 
-            var result = await dlq.TryReadAsync();
-            Assert.True(result.Success);
-
-            var deadLetter = result.Message as DeadLetterMessage<TestMessage>;
             Assert.NotNull(deadLetter);
             Assert.NotEqual(Guid.Empty, deadLetter.CorrelationId);
         }

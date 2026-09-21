@@ -262,5 +262,19 @@ public class DurablePublishTests : IDisposable
         public void IncrementAttempt(Guid messageId) { }
 
         public IEnumerable<PersistedMessage<T>> GetPendingMessages() => [];
+
+        public PersistedMessage<T>? TryClaim(Guid messageId) => null;
+
+        public void MarkCompleted(Guid messageId) { }
+
+        public void ScheduleRetry(Guid messageId, DateTimeOffset nextAttemptAt, string? error) { }
+
+        public void MarkDeadLettered(Guid messageId, string? error) { }
+
+        public int RecoverInterrupted() => 0;
+
+        public IEnumerable<PersistedMessage<T>> GetDueMessages(DateTimeOffset now) => [];
+
+        public bool ReplayDeadLetter(Guid messageId) => false;
     }
 }

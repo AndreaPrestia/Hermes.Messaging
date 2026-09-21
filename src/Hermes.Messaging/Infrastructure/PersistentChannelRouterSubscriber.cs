@@ -28,10 +28,19 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
     private readonly TimeSpan _maxRetryDelay;
     private readonly int _maxConcurrency;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromHours(1);
+    private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(1);
     private static readonly string CircuitKeyPrefix = typeof(T).Name + ":";
+
+    private readonly Channel<Guid> _wakeups = Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false
+    });
 
     private CancellationTokenSource? _cleanupCts;
     private Task? _cleanupTask;
+    private CancellationTokenSource? _reconcileCts;
+    private Task? _reconcileTask;
 
     public PersistentChannelRouterSubscriber(
         ChannelRouteTable<T> routes,
@@ -70,51 +79,92 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Replay pending messages from previous crash
-        await ReplayPendingMessagesAsync(stoppingToken);
+        // Startup interrupted-recovery: any message left Processing (or the retired Failed
+        // state) by a previous crash is returned to Pending so it can be re-claimed.
+        var recovered = _messageStore.RecoverInterrupted();
+        if (recovered > 0)
+        {
+            _logger?.LogInformation("Recovered {Count} interrupted messages to Pending on startup", recovered);
+        }
 
-        // Start cleanup task with proper lifecycle
+        // Seed the wake-up channel with all currently due work (Pending + due retries).
+        // This also covers signals that were lost before this process started.
+        SignalDueWork();
+
+        // Start background loops with proper lifecycle.
         _cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _cleanupTask = CleanupLoopAsync(_cleanupCts.Token);
 
+        _reconcileCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        _reconcileTask = ReconcileLoopAsync(_reconcileCts.Token);
+
+        // Bridge the incoming fast-path channel (ChannelMessage<T> from the publisher) into
+        // the internal wake-up channel keyed by MessageId. The durable store is the source
+        // of truth; the wake-up is only an acceleration signal.
+        var bridge = BridgeIncomingSignalsAsync(stoppingToken);
+
         if (_maxConcurrency == 1)
         {
-            await ProcessSequentialAsync(stoppingToken);
+            await ProcessSequentialAsync(stoppingToken).ConfigureAwait(false);
         }
         else
         {
-            await ProcessConcurrentAsync(stoppingToken);
+            await ProcessConcurrentAsync(stoppingToken).ConfigureAwait(false);
+        }
+
+        await bridge.ConfigureAwait(false);
+    }
+
+    private async Task BridgeIncomingSignalsAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await foreach (var envelope in _reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            {
+                _wakeups.Writer.TryWrite(envelope.MessageId);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Expected on shutdown.
+        }
+    }
+
+    private void SignalDueWork()
+    {
+        foreach (var due in _messageStore.GetDueMessages(DateTimeOffset.UtcNow))
+        {
+            _wakeups.Writer.TryWrite(due.MessageId);
         }
     }
 
     private async Task ProcessSequentialAsync(CancellationToken stoppingToken)
     {
-        await foreach (var envelope in _reader.ReadAllAsync(stoppingToken))
+        await foreach (var messageId in _wakeups.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
         {
-            await ProcessEnvelopeAsync(envelope, stoppingToken).ConfigureAwait(false);
+            await ProcessMessageAsync(messageId, stoppingToken).ConfigureAwait(false);
         }
     }
 
     private async Task ProcessConcurrentAsync(CancellationToken stoppingToken)
     {
-        // INVARIANT: The channel is created with SingleReader=true.
-        // This loop is the sole reader — it dequeues sequentially and hands off
-        // to worker tasks via Task.Run. Do NOT add a second reader.
+        // The wake-up channel is SingleReader=true; this loop is the sole reader.
+        // It hands off claimed work to bounded worker tasks. (A fixed worker-loop
+        // rewrite is deliberately deferred to HERMES-004.)
         using var semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
         var activeTasks = new List<Task>();
 
-        await foreach (var envelope in _reader.ReadAllAsync(stoppingToken))
+        await foreach (var messageId in _wakeups.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
         {
             await semaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
 
-            // Remove completed tasks to avoid unbounded list growth
             activeTasks.RemoveAll(t => t.IsCompleted);
 
             activeTasks.Add(Task.Run(async () =>
             {
                 try
                 {
-                    await ProcessEnvelopeAsync(envelope, stoppingToken).ConfigureAwait(false);
+                    await ProcessMessageAsync(messageId, stoppingToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -123,97 +173,116 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             }, stoppingToken));
         }
 
-        // Wait for all in-flight tasks to complete on shutdown
         await Task.WhenAll(activeTasks).ConfigureAwait(false);
     }
 
-    private async Task ProcessEnvelopeAsync(ChannelMessage<T> envelope, CancellationToken stoppingToken)
+    /// <summary>
+    /// Claims a message and performs a single processing attempt. Duplicate signals are
+    /// safe: only the claim that transitions the record to Processing proceeds; any other
+    /// signal for the same message finds it un-claimable and is ignored.
+    /// </summary>
+    private async Task ProcessMessageAsync(Guid messageId, CancellationToken stoppingToken)
     {
-        using var scope = _scopeFactory.CreateScope();
-
-        ChannelMetrics.RecordDequeued(typeof(T), envelope.Path);
-
-        // The publisher already durably persisted this message as Pending before signalling
-        // the channel (persist-before-signal). The subscriber must NOT insert a duplicate
-        // durable record — it only transitions the existing record's status.
-
-        try
+        // Atomic claim: Pending|due-RetryScheduled -> Processing (+ attempt increment).
+        var claimed = _messageStore.TryClaim(messageId);
+        if (claimed is null)
         {
-            await DispatchWithRetryAsync(envelope, scope.ServiceProvider, stoppingToken).ConfigureAwait(false);
-
-            // Mark as completed
-            _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.Completed);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // Message remains persisted as Pending; it will be replayed on next startup
-            // via ReplayPendingMessagesAsync.
-            _logger?.LogDebug("Processing cancelled during shutdown for MessageId: {MessageId} — will replay on next startup", envelope.MessageId);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Message failed after all retries for path '{Path}', MessageId: {MessageId} - moving to dead letter queue", envelope.Path, envelope.MessageId);
-
-            // Move to dead letter queue
-            if (!_deadLetterQueue.TryEnqueue(envelope.Path, envelope.Body, ex, _maxRetryAttempts, envelope.CorrelationId))
-            {
-                _logger?.LogCritical("Dead letter queue is full — message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", envelope.Path, envelope.MessageId);
-                ChannelMetrics.RecordDropped(typeof(T), envelope.Path);
-            }
-
-            // Mark as dead lettered
-            _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.DeadLettered, ex.Message);
-        }
-    }
-
-    private async Task ReplayPendingMessagesAsync(CancellationToken cancellationToken)
-    {
-        var pending = _messageStore.GetPendingMessages().ToList();
-        
-        if (pending.Count == 0)
-        {
+            // Not claimable: already Processing/Completed/DeadLettered, missing, or a
+            // duplicate signal. Nothing to do.
             return;
         }
 
-        _logger?.LogInformation("Replaying {Count} pending messages after crash recovery", pending.Count);
+        using var scope = _scopeFactory.CreateScope();
+        ChannelMetrics.RecordDequeued(typeof(T), claimed.Path);
 
-        foreach (var persisted in pending)
+        var envelope = new ChannelMessage<T>(claimed.Path, claimed.Body, claimed.CorrelationId, claimed.MessageId);
+
+        try
+        {
+            await DispatchOnceAsync(envelope, scope.ServiceProvider, stoppingToken).ConfigureAwait(false);
+            _messageStore.MarkCompleted(claimed.MessageId);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Shutdown mid-processing: leave as Processing so startup recovery returns it to
+            // Pending on the next run. Do not surface as a failure.
+            _logger?.LogDebug("Processing cancelled during shutdown for MessageId: {MessageId} — will recover on next startup", claimed.MessageId);
+        }
+        catch (Exception ex)
+        {
+            HandleAttemptFailure(claimed, ex);
+        }
+    }
+
+    private void HandleAttemptFailure(PersistedMessage<T> claimed, Exception ex)
+    {
+        // A missing route is a configuration error — do not retry, dead-letter immediately.
+        if (ex is RouteNotFoundException)
+        {
+            _logger?.LogError(ex, "No route for path '{Path}', MessageId: {MessageId} — dead lettering (no retry)", claimed.Path, claimed.MessageId);
+            if (!_deadLetterQueue.TryEnqueue(claimed.Path, claimed.Body, ex, claimed.AttemptCount, claimed.CorrelationId))
+            {
+                ChannelMetrics.RecordDropped(typeof(T), claimed.Path);
+            }
+            _messageStore.MarkDeadLettered(claimed.MessageId, ex.Message);
+            return;
+        }
+
+        // claimed.AttemptCount already reflects the attempt just made (incremented at claim).
+        if (claimed.AttemptCount >= _maxRetryAttempts)
+        {
+            _logger?.LogError(ex, "Message exhausted retries for path '{Path}', MessageId: {MessageId} — dead lettering", claimed.Path, claimed.MessageId);
+
+            if (!_deadLetterQueue.TryEnqueue(claimed.Path, claimed.Body, ex, claimed.AttemptCount, claimed.CorrelationId))
+            {
+                _logger?.LogCritical("Dead letter queue is full — message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", claimed.Path, claimed.MessageId);
+                ChannelMetrics.RecordDropped(typeof(T), claimed.Path);
+            }
+
+            _messageStore.MarkDeadLettered(claimed.MessageId, ex.Message);
+            return;
+        }
+
+        // Durably schedule a future retry with jittered exponential backoff. The worker is
+        // NOT held by the delay — the reconciliation loop re-signals the message when due.
+        var nextAttemptAt = DateTimeOffset.UtcNow + ComputeBackoff(claimed.AttemptCount);
+        ChannelMetrics.RecordRetry(typeof(T), claimed.Path);
+        _logger?.LogWarning(ex, "Scheduling retry for path '{Path}', MessageId: {MessageId} (attempt {Attempt}/{MaxAttempts}) at {NextAttemptAt:o}",
+            claimed.Path, claimed.MessageId, claimed.AttemptCount, _maxRetryAttempts, nextAttemptAt);
+        _messageStore.ScheduleRetry(claimed.MessageId, nextAttemptAt, ex.Message);
+    }
+
+    private TimeSpan ComputeBackoff(int attemptCount)
+    {
+        // attemptCount is 1-based for the attempt just completed.
+        var exponent = Math.Max(0, attemptCount - 1);
+        var baseMs = _initialRetryDelay.TotalMilliseconds * Math.Pow(2, exponent);
+        var cappedMs = Math.Min(baseMs, _maxRetryDelay.TotalMilliseconds);
+        // Full jitter in [0.5x, 1.0x] of the capped delay to avoid thundering herds.
+        var jittered = cappedMs * (0.5 + Random.Shared.NextDouble() * 0.5);
+        return TimeSpan.FromMilliseconds(jittered);
+    }
+
+    private async Task ReconcileLoopAsync(CancellationToken cancellationToken)
+    {
+        // Periodic reconciliation: re-signal due work. This recovers lost fast-path signals
+        // and picks up RetryScheduled messages whose NextAttemptAt has arrived.
+        while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                var envelope = new ChannelMessage<T>(persisted.Path, persisted.Body, persisted.CorrelationId, persisted.MessageId);
-
-                using var scope = _scopeFactory.CreateScope();
-
-                _messageStore.IncrementAttempt(persisted.MessageId);
-
-                await DispatchWithRetryAsync(envelope, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
-
-                _messageStore.UpdateStatus(persisted.MessageId, MessageStatus.Completed);
-
-                _logger?.LogInformation("Successfully replayed message with MessageId: {MessageId}", persisted.MessageId);
+                await Task.Delay(ReconcileInterval, cancellationToken).ConfigureAwait(false);
+                SignalDueWork();
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Failed to replay message with MessageId: {MessageId}", persisted.MessageId);
-
-                if (persisted.AttemptCount >= _maxRetryAttempts)
-                {
-                    if (!_deadLetterQueue.TryEnqueue(persisted.Path, persisted.Body, ex, persisted.AttemptCount, persisted.CorrelationId))
-                    {
-                        _logger?.LogCritical("Dead letter queue is full — replayed message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", persisted.Path, persisted.MessageId);
-                        ChannelMetrics.RecordDropped(typeof(T), persisted.Path);
-                    }
-                    _messageStore.UpdateStatus(persisted.MessageId, MessageStatus.DeadLettered, ex.Message);
-                }
-                else
-                {
-                    _messageStore.UpdateStatus(persisted.MessageId, MessageStatus.Failed, ex.Message);
-                }
+                _logger?.LogError(ex, "Error during reconciliation scan");
             }
         }
-        
-        _logger?.LogInformation("Replay completed for {Count} messages", pending.Count);
     }
 
     private async Task CleanupLoopAsync(CancellationToken cancellationToken)
@@ -246,7 +315,19 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Cancel and await cleanup task before stopping
+        // Stop background loops before stopping the processing loop.
+        if (_reconcileCts is not null)
+        {
+            await _reconcileCts.CancelAsync();
+            _reconcileCts.Dispose();
+        }
+
+        if (_reconcileTask is not null)
+        {
+            try { await _reconcileTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { /* expected */ }
+        }
+
         if (_cleanupCts is not null)
         {
             await _cleanupCts.CancelAsync();
@@ -259,112 +340,45 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             catch (OperationCanceledException) { /* expected */ }
         }
 
-        // Stop ExecuteAsync first (signals stoppingToken, waits for the read loop to finish).
-        // Then drain any messages still in the channel that ExecuteAsync didn't consume.
-        // The cancellationToken here is the host shutdown token with a graceful timeout,
-        // so dispatch/retry inside drain can still complete within that window.
+        // Stop ExecuteAsync (signals stoppingToken, awaits in-flight handlers up to the host
+        // grace period). We deliberately do NOT drain the entire backlog: any message left
+        // Pending/Processing stays durable and is recovered/re-signaled on the next start.
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
-        await DrainPendingMessagesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task DispatchWithRetryAsync(ChannelMessage<T> envelope, IServiceProvider services, CancellationToken cancellationToken)
+    /// <summary>
+    /// Performs a single dispatch attempt. Retries are handled durably (RetryScheduled),
+    /// not inside this method, so a worker is never held by a retry delay.
+    /// </summary>
+    private async Task DispatchOnceAsync(ChannelMessage<T> envelope, IServiceProvider services, CancellationToken cancellationToken)
     {
-        var attempt = 0;
-        var delay = _initialRetryDelay;
-
-        while (true)
+        var circuitKey = CircuitKeyPrefix + envelope.Path;
+        if (_circuitBreaker.IsOpen(circuitKey))
         {
-            // Check circuit breaker before attempting
-            var circuitKey = CircuitKeyPrefix + envelope.Path;
-            if (_circuitBreaker.IsOpen(circuitKey))
-            {
-                _logger?.LogWarning("Circuit breaker is open for route '{Path}', CorrelationId: {CorrelationId} - skipping dispatch", envelope.Path, envelope.CorrelationId);
-                throw new CircuitBreakerOpenException($"Circuit breaker open for route: {envelope.Path}");
-            }
-
-            var stopwatch = Stopwatch.StartNew();
-
-            try
-            {
-                await _routes.DispatchAsync(envelope.Path, envelope.Body, services, cancellationToken).ConfigureAwait(false);
-                stopwatch.Stop();
-
-                ChannelMetrics.RecordDispatchSuccess(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
-                _circuitBreaker.RecordSuccess(circuitKey);
-                return;
-            }
-            catch (RouteNotFoundException)
-            {
-                stopwatch.Stop();
-                // Configuration error — no retries, no circuit breaker impact
-                throw;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                stopwatch.Stop();
-                ChannelMetrics.RecordDispatchFailure(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                stopwatch.Stop();
-                ChannelMetrics.RecordDispatchFailure(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
-                _circuitBreaker.RecordFailure(circuitKey);
-
-                attempt++;
-
-                if (attempt >= _maxRetryAttempts)
-                {
-                    throw;
-                }
-
-                ChannelMetrics.RecordRetry(typeof(T), envelope.Path);
-                _logger?.LogWarning(ex, "Retrying message for path '{Path}', CorrelationId: {CorrelationId} (attempt {Attempt}/{MaxAttempts})", 
-                    envelope.Path, envelope.CorrelationId, attempt, _maxRetryAttempts);
-
-                try
-                {
-                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-
-                // Exponential backoff with cap
-                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, _maxRetryDelay.TotalMilliseconds));
-            }
+            _logger?.LogWarning("Circuit breaker is open for route '{Path}', MessageId: {MessageId} - skipping dispatch", envelope.Path, envelope.MessageId);
+            throw new CircuitBreakerOpenException($"Circuit breaker open for route: {envelope.Path}");
         }
-    }
 
-    private async Task DrainPendingMessagesAsync(CancellationToken cancellationToken)
-    {
-        while (_reader.TryRead(out var envelope))
+        var stopwatch = Stopwatch.StartNew();
+        try
         {
-            using var scope = _scopeFactory.CreateScope();
-            ChannelMetrics.RecordDequeued(typeof(T), envelope.Path);
-
-            // Already durably persisted by the publisher; do not insert a duplicate record.
-
-            try
-            {
-                await DispatchWithRetryAsync(envelope, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
-                _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.Completed);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Error draining message for path '{Path}', MessageId: {MessageId} - moving to dead letter queue", envelope.Path, envelope.MessageId);
-                if (!_deadLetterQueue.TryEnqueue(envelope.Path, envelope.Body, ex, _maxRetryAttempts, envelope.CorrelationId))
-                {
-                    _logger?.LogCritical("Dead letter queue is full — drained message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", envelope.Path, envelope.MessageId);
-                    ChannelMetrics.RecordDropped(typeof(T), envelope.Path);
-                }
-                _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.DeadLettered, ex.Message);
-            }
+            await _routes.DispatchAsync(envelope.Path, envelope.Body, services, cancellationToken).ConfigureAwait(false);
+            stopwatch.Stop();
+            ChannelMetrics.RecordDispatchSuccess(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
+            _circuitBreaker.RecordSuccess(circuitKey);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            stopwatch.Stop();
+            ChannelMetrics.RecordDispatchFailure(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
+            throw;
+        }
+        catch (Exception)
+        {
+            stopwatch.Stop();
+            ChannelMetrics.RecordDispatchFailure(typeof(T), envelope.Path, stopwatch.Elapsed.TotalMilliseconds);
+            _circuitBreaker.RecordFailure(circuitKey);
+            throw;
         }
     }
 }

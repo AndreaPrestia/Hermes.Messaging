@@ -4,9 +4,16 @@
 > described below has been fixed. `PublishAsync` now validates the route, durably
 > persists the message (Pending) with a unique `MessageId`, and only then does a
 > best-effort Channel signal before returning an accepted `PublishResult`. The
-> subscriber no longer inserts a duplicate durable record. The remaining defects
-> below (duplicate replay, recovery stranding, volatile DLQ) are still open and are
-> addressed by later phases.
+> subscriber no longer inserts a duplicate durable record.
+>
+> **Phase 2 update (HERMES-002 implemented).** The durable state machine is in place:
+> `Pending -> Processing -> Completed`, `Processing -> RetryScheduled -> Processing`,
+> `Processing -> DeadLettered`, and explicit `DeadLettered -> Pending` replay. Messages
+> are claimed atomically via `TryClaim` (duplicate-signal safe), retries are durable
+> (`RetryScheduled` + `NextAttemptAt`) and paced by a reconciliation loop rather than
+> holding a worker, and startup recovery returns interrupted `Processing` (and the retired
+> `Failed`) records to `Pending`. The recovery-stranding defect below is fixed. The
+> volatile in-memory DLQ is still open and is addressed by HERMES-003.
 
 Audited publish flow (baseline, before HERMES-001):
 ```text
@@ -39,11 +46,13 @@ restart replays Pending
 side effect happens again
 ```
 
-Recovery defect:
-- startup loads only `Pending`;
-- replay failure may mark `Failed`;
-- `Failed` is not loaded later;
-- persisted attempt counts do not accurately reflect runtime attempts.
+Recovery defect (FIXED in HERMES-002):
+- ~~startup loads only `Pending`;~~
+- ~~replay failure may mark `Failed`;~~
+- ~~`Failed` is not loaded later;~~
+- startup now recovers interrupted `Processing` (and retired `Failed`) back to `Pending`;
+- no status is left in an unscanned state;
+- attempt count is incremented atomically at claim time.
 
 DLQ defect:
 - current DLQ is an in-memory bounded Channel;

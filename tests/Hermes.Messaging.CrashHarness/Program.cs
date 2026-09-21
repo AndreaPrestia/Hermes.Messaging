@@ -2,63 +2,111 @@ using Hermes.Messaging.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-// Crash harness for the HERMES-001 durable publish boundary.
+// Crash / recovery harness for the durable publish boundary and state machine.
 //
-// Usage: Hermes.Messaging.CrashHarness <persistenceBasePath>
+// Usage:
+//   Hermes.Messaging.CrashHarness crash   <persistenceBasePath>
+//   Hermes.Messaging.CrashHarness recover <persistenceBasePath>
 //
-// Behaviour:
-//   1. Start a Hermes host whose handler NEVER completes (blocks forever), so the
-//      published message stays Pending in the durable store.
-//   2. Publish a message. Because publish is persist-before-signal, the returned
-//      PublishResult means the record is already durably committed.
-//   3. Print "MESSAGEID=<guid>" to stdout so the parent test can read it.
-//   4. Hard-kill this process (Environment.FailFast) — NOT a graceful StopAsync —
-//      to simulate a real crash after acceptance.
+// crash mode (HERMES-001 / HERMES-002 crash window):
+//   1. Start a host whose handler NEVER completes (blocks), so the published message is
+//      left durable (Pending or Processing) but not Completed.
+//   2. Publish a message (persist-before-signal => already durably committed).
+//   3. Print DBPATH / COLLECTION / MESSAGEID, then hard-crash via Environment.FailFast.
 //
-// The parent test then re-opens the same durable store and asserts the record survived.
+// recover mode (HERMES-002 recovery):
+//   1. Start a host with a WORKING handler on the same store/path.
+//   2. Startup recovery returns interrupted Processing -> Pending; the message is then
+//      re-claimed and processed to Completed.
+//   3. Print RECOVERED=<id> and exit gracefully.
 
-if (args.Length < 1)
+if (args.Length < 2)
 {
-    Console.Error.WriteLine("Missing persistence base path argument.");
+    Console.Error.WriteLine("Usage: <crash|recover> <persistenceBasePath>");
     Environment.Exit(2);
     return;
 }
 
-var basePath = args[0];
+var mode = args[0];
+var basePath = args[1];
 
-var host = Host.CreateDefaultBuilder()
-    .ConfigureServices(services =>
-    {
-        services.AddHermesMessaging(opts => opts.PersistenceBasePath = basePath);
-        services.AddDeadLetterQueue<HarnessMessage>();
-        services.AddChannelSubscription<HarnessMessage>(
-            "crash/route",
-            // Never completes: keeps the message in the Pending state.
-            async (_, _, ct) =>
-            {
-                try { await Task.Delay(Timeout.Infinite, ct); }
-                catch (OperationCanceledException) { }
-            });
-    })
-    .Build();
-
-await host.StartAsync();
-
-var bus = host.Services.GetRequiredService<IMessageBus>();
-var result = await bus.PublishAsync("crash/route", new HarnessMessage("crash-payload"));
-
-// Signal acceptance to the parent, flush, then crash hard WITHOUT graceful shutdown.
-// Emit the exact durable store path so the parent test does not have to guess it.
 var safeTypeName = (typeof(HarnessMessage).FullName ?? typeof(HarnessMessage).Name)
     .Replace('.', '_').Replace('+', '_');
 var dbPath = Path.Combine(basePath, $"{safeTypeName}.db");
 
-Console.Out.WriteLine($"DBPATH={dbPath}");
-Console.Out.WriteLine($"COLLECTION=messages_{typeof(HarnessMessage).Name}");
-Console.Out.WriteLine($"MESSAGEID={result.MessageId}");
-Console.Out.Flush();
+if (mode == "crash")
+{
+    var host = Host.CreateDefaultBuilder()
+        .ConfigureServices(services =>
+        {
+            services.AddHermesMessaging(opts => opts.PersistenceBasePath = basePath);
+            services.AddDeadLetterQueue<HarnessMessage>();
+            services.AddChannelSubscription<HarnessMessage>(
+                "crash/route",
+                // Never completes: keeps the message from reaching Completed.
+                async (_, _, ct) =>
+                {
+                    try { await Task.Delay(Timeout.Infinite, ct); }
+                    catch (OperationCanceledException) { }
+                });
+        })
+        .Build();
 
-// Hard crash: bypasses host.StopAsync / drain / dispose entirely.
-Environment.FailFast("Simulated crash after durable publish acceptance.");
+    await host.StartAsync();
+
+    var bus = host.Services.GetRequiredService<IMessageBus>();
+    var result = await bus.PublishAsync("crash/route", new HarnessMessage("crash-payload"));
+
+    Console.Out.WriteLine($"DBPATH={dbPath}");
+    Console.Out.WriteLine($"COLLECTION=messages_{typeof(HarnessMessage).Name}");
+    Console.Out.WriteLine($"MESSAGEID={result.MessageId}");
+    Console.Out.Flush();
+
+    // Hard crash: bypasses host.StopAsync / dispose entirely.
+    Environment.FailFast("Simulated crash after durable publish acceptance.");
+    return;
+}
+
+if (mode == "recover")
+{
+    var processed = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    var host = Host.CreateDefaultBuilder()
+        .ConfigureServices(services =>
+        {
+            services.AddHermesMessaging(opts => opts.PersistenceBasePath = basePath);
+            services.AddDeadLetterQueue<HarnessMessage>();
+            services.AddChannelSubscription<HarnessMessage>(
+                "crash/route",
+                (_, _, _) =>
+                {
+                    processed.TrySetResult(Guid.Empty);
+                    return Task.CompletedTask;
+                });
+        })
+        .Build();
+
+    await host.StartAsync();
+
+    try
+    {
+        await processed.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Console.Out.WriteLine("RECOVERED=1");
+        Console.Out.Flush();
+    }
+    catch (TimeoutException)
+    {
+        Console.Error.WriteLine("Recovery timed out — message was not reprocessed.");
+        await host.StopAsync();
+        Environment.Exit(3);
+        return;
+    }
+
+    await host.StopAsync();
+    return;
+}
+
+Console.Error.WriteLine($"Unknown mode '{mode}'.");
+Environment.Exit(2);
 
 internal sealed record HarnessMessage(string Value);

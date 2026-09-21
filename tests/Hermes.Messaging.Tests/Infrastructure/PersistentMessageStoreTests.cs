@@ -57,11 +57,11 @@ public class PersistentMessageStoreTests : IDisposable
         var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), Guid.CreateVersion7(DateTimeOffset.UtcNow), messageId);
         _store.Persist(message);
 
-        _store.UpdateStatus(messageId, MessageStatus.Failed, "Connection timeout");
+        _store.UpdateStatus(messageId, MessageStatus.DeadLettered, "Connection timeout");
 
         var persisted = _store.GetByMessageId(messageId);
         Assert.NotNull(persisted);
-        Assert.Equal(MessageStatus.Failed, persisted.Status);
+        Assert.Equal(MessageStatus.DeadLettered, persisted.Status);
         Assert.Equal("Connection timeout", persisted.LastError);
     }
 
@@ -156,15 +156,15 @@ public class PersistentMessageStoreTests : IDisposable
         var pending1 = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var pending2 = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var completed = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        var failed = Guid.CreateVersion7(DateTimeOffset.UtcNow);
+        var retryScheduled = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var deadLettered = Guid.CreateVersion7(DateTimeOffset.UtcNow);
 
         _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), Guid.CreateVersion7(DateTimeOffset.UtcNow), pending1));
         _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), Guid.CreateVersion7(DateTimeOffset.UtcNow), pending2));
         _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), Guid.CreateVersion7(DateTimeOffset.UtcNow), completed));
         _store.UpdateStatus(completed, MessageStatus.Completed);
-        _store.Persist(new ChannelMessage<TestMessage>("path4", new TestMessage("data4"), Guid.CreateVersion7(DateTimeOffset.UtcNow), failed));
-        _store.UpdateStatus(failed, MessageStatus.Failed);
+        _store.Persist(new ChannelMessage<TestMessage>("path4", new TestMessage("data4"), Guid.CreateVersion7(DateTimeOffset.UtcNow), retryScheduled));
+        _store.ScheduleRetry(retryScheduled, DateTimeOffset.UtcNow.AddMinutes(1), "boom");
         _store.Persist(new ChannelMessage<TestMessage>("path5", new TestMessage("data5"), Guid.CreateVersion7(DateTimeOffset.UtcNow), deadLettered));
         _store.UpdateStatus(deadLettered, MessageStatus.DeadLettered);
 
@@ -172,7 +172,7 @@ public class PersistentMessageStoreTests : IDisposable
 
         Assert.Equal(2, stats.PendingCount);
         Assert.Equal(1, stats.CompletedCount);
-        Assert.Equal(1, stats.FailedCount);
+        Assert.Equal(1, stats.RetryScheduledCount);
         Assert.Equal(1, stats.DeadLetteredCount);
         Assert.Equal(5, stats.TotalCount);
     }
