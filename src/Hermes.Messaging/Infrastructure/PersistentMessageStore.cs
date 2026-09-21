@@ -30,31 +30,74 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
         _db = new LiteDatabase(databasePath);
         _messages = _db.GetCollection<PersistedMessage<T>>($"messages_{typeof(T).Name}");
 
-        // MessageId is the unique technical identity and durable key.
-        // CorrelationId is a logical, NON-unique value — never a unique key.
+        // 1) Validate compatibility BEFORE mutating store structure. An older Hermes build must not
+        //    modify indexes in a store written by a NEWER schema before refusing to use it
+        //    (docs/architecture/adr-storage-versioning.md). This is a minimal guard, not a
+        //    migration engine: it never rewrites or discards records.
+        var storedSchema = ReadStoredSchemaVersion();
+        if (storedSchema > PersistedMessageSchema.CurrentVersion)
+        {
+            _db.Dispose();
+            throw new StoreSchemaMismatchException(databasePath, storedSchema, PersistedMessageSchema.CurrentVersion);
+        }
+
+        // 2) Only after compatibility is established do we mutate structure (ensure indexes).
+        //    MessageId is the unique technical identity and durable key. CorrelationId is a
+        //    logical, NON-unique value — never a unique key.
         _messages.EnsureIndex(x => x.MessageId, unique: true);
         _messages.EnsureIndex(x => x.CorrelationId, unique: false);
         _messages.EnsureIndex(x => x.Status);
         _messages.EnsureIndex(x => x.CreatedAt);
 
-        // Fail fast rather than silently mishandle a store written by a NEWER Hermes schema.
-        // See docs/architecture/adr-storage-versioning.md. This is a minimal guard, not a
-        // migration engine: it never rewrites or discards records. Empty store => count 0 => skip.
-        if (_messages.Count() > 0)
-        {
-            var maxSchema = _messages.Query()
-                .OrderByDescending(x => x.SchemaVersion)
-                .Select(x => x.SchemaVersion)
-                .Limit(1)
-                .ToList()
-                .FirstOrDefault();
+        // 3) Persist a small O(1) schema-metadata document so subsequent opens do NOT need to scan
+        //    the message collection. Written only after compatibility is established.
+        WriteStoredSchemaVersion(Math.Max(storedSchema, PersistedMessageSchema.CurrentVersion));
+    }
 
-            if (maxSchema > PersistedMessageSchema.CurrentVersion)
-            {
-                _db.Dispose();
-                throw new StoreSchemaMismatchException(databasePath, maxSchema, PersistedMessageSchema.CurrentVersion);
-            }
+    // Dedicated single-document metadata collection: schema version lookup is O(1) and needs no
+    // scan/index over the (potentially large) message collection. Older stores predate this
+    // document; for them we fall back once to the per-record maximum (a scan on first open only),
+    // then upgrade to the metadata document.
+    private const string MetaCollectionName = "hermes_meta";
+    private const string SchemaMetaId = "schema";
+
+    private int ReadStoredSchemaVersion()
+    {
+        var meta = _db.GetCollection<StoreMetadata>(MetaCollectionName);
+        var doc = meta.FindById(SchemaMetaId);
+        if (doc is not null)
+        {
+            return doc.SchemaVersion;
         }
+
+        // No metadata document yet (empty store, or a store written before the metadata document
+        // existed). Fall back to the per-record maximum. Empty message collection => version 0
+        // (compatible). This scan happens at most once per store, before the metadata is written.
+        if (_messages.Count() == 0)
+        {
+            return 0;
+        }
+
+        return _messages.Query()
+            .OrderByDescending(x => x.SchemaVersion)
+            .Select(x => x.SchemaVersion)
+            .Limit(1)
+            .ToList()
+            .FirstOrDefault();
+    }
+
+    private void WriteStoredSchemaVersion(int version)
+    {
+        var meta = _db.GetCollection<StoreMetadata>(MetaCollectionName);
+        meta.Upsert(new StoreMetadata { Id = SchemaMetaId, SchemaVersion = version });
+    }
+
+    /// <summary>Single-document store metadata (schema version). Not a message record.</summary>
+    private sealed class StoreMetadata
+    {
+        [BsonId]
+        public string Id { get; set; } = SchemaMetaId;
+        public int SchemaVersion { get; set; }
     }
 
     /// <summary>

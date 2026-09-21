@@ -55,6 +55,20 @@ file or drain the old backlog first.
   additive compatibility is the only supported forward path.
 - **Equal versions:** normal operation.
 
+### How the version is read (ordering & scalability)
+
+- **Validation precedes mutation.** The compatibility check runs **before** any `EnsureIndex`
+  call, so an older build never mutates the structure of a store written by a newer schema before
+  refusing to open it.
+- **O(1) metadata document.** The store persists a single `schema` document in a small
+  `hermes_meta` collection and reads it (by id) on open — no scan or index over the potentially
+  large message collection. It is (re)written only after compatibility is established.
+- **Legacy stores.** A store written before the metadata document existed has no `hermes_meta`
+  entry; on first open Hermes falls back **once** to the maximum `SchemaVersion` across records
+  (a single scan), then writes the metadata document so subsequent opens are O(1). An empty store
+  is treated as version 0 (compatible). Newer/unknown schema is never silently treated as
+  compatible.
+
 ### When should Hermes fail fast?
 
 - Store schema strictly newer than the running build (implemented).
