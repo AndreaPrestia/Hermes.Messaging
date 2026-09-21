@@ -513,9 +513,11 @@ and observing lifecycle/state via `IMessageBusDiagnostics`. **Not supported:** r
 engine, resolving/instantiating any implementation type, or mutating runtime state directly — those are
 internal and may change without notice.
 
-Stability note: **`0.4.x` remains alpha.** The public API may still change before the `0.5.0-beta`
-freeze. Implementation types are not supported extension points. The exact public surface is captured in
-[`PublicAPI.Shipped.txt`](src/Hermes.Messaging/PublicAPI.Shipped.txt) and enforced at build time by
-`Microsoft.CodeAnalysis.PublicApiAnalyzers` (RS0016/RS0017 as errors), so accidental additions, removals,
-or signature/nullability changes fail CI. Maintainers add a public API deliberately by recording it in
-`PublicAPI.Unshipped.txt`.
+Stability note: **`0.5.x` is the beta API line.** The intended consumer API is now tracked as the
+shipped compatibility baseline ([`PublicAPI.Shipped.txt`](src/Hermes.Messaging/PublicAPI.Shipped.txt))
+by `Microsoft.CodeAnalysis.PublicApiAnalyzers` (RS0016/RS0017 as errors), so accidental additions,
+removals, or signature/nullability changes fail CI. Breaking public API changes during beta should be
+exceptional, explicitly documented, and reflected in the API baseline (recorded in
+`PublicAPI.Unshipped.txt`, then reconciled into `PublicAPI.Shipped.txt` on release). This is a beta
+line, not a 1.0 stability guarantee. Implementation types remain internal and are not supported
+extension points.

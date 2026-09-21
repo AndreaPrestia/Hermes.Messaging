@@ -5,6 +5,40 @@ changes are acceptable when required for correctness and are called out explicit
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0-beta] — 2026-09-21
+
+First **beta**: the intended public API is frozen as the compatibility baseline for the `0.5.x`
+line. This is a metadata/documentation/baseline release — there is **no** runtime change.
+
+### Changed
+- **Attribution resolved.** `LICENSE` copyright holder changed from `Kakama` to
+  `Andrea Prestia` (MIT license type and body unchanged), matching the NuGet `<Authors>`. The
+  previously-documented attribution discrepancy is resolved and is no longer a release blocker.
+
+### API stability
+- **Public API frozen for beta.** The full current public API was promoted from
+  `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt`; `PublicAPI.Unshipped.txt` is now empty
+  (just `#nullable enable`). `PublicAPI.Shipped.txt` is the beta compatibility floor, enforced by
+  `Microsoft.CodeAnalysis.PublicApiAnalyzers` (RS0016/RS0017 + nullability/order/duplicate rules as
+  build errors). The compiled exported surface is byte-for-byte identical to `0.4.2-alpha` — only
+  which baseline file declares it changed.
+- Consumer namespace remains the single root `Hermes.Messaging`. No implementation types are public.
+- **Post-beta workflow:** future public API changes should be exceptional, explicitly documented,
+  and recorded in `PublicAPI.Unshipped.txt`, then reconciled into `PublicAPI.Shipped.txt` on the next
+  release. This is a beta line — it does **not** claim 1.0-level compatibility guarantees.
+
+### Packaging
+- Version bumped to `0.5.0-beta` (single source: `<Version>` in `Hermes.Messaging.csproj`; CI, pack,
+  smoke test, and SourceLink all derive it automatically).
+- `Microsoft.CodeAnalysis.PublicApiAnalyzers` remains `PrivateAssets=all` — not a consumer dependency.
+
+### Notes
+- **No messaging runtime, delivery, retry, DLQ, reconciliation, lifecycle, storage, or performance
+  behavior changed.** All frozen invariants are intact and covered by the unchanged test suite.
+- Baseline provenance is the repository's intentional freeze process. The repository has no GitHub
+  Releases and the only pre-existing Git tag is `v0.2.0-alpha`; NuGet.org publication history of
+  intermediate alpha builds is not used as the compatibility-baseline source.
+
 ## [0.4.2-alpha] — 2026-09-21
 
 **Release / API baseline hygiene.** No runtime, delivery, persistence, retry, DLQ, reconciliation,

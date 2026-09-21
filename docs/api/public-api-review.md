@@ -1,8 +1,8 @@
-# Public API Review — current (`0.4.2-alpha`)
+# Public API Review — current (`0.5.0-beta`)
 
 This document describes the **current** supported public API of `Hermes.Messaging` and the workflow
-for maintaining its compatibility baseline. It reflects the state after the `0.4.0`→`0.4.2-alpha`
-cleanup passes.
+for maintaining its compatibility baseline. It reflects the `0.5.0-beta` public API freeze (the
+current API is now the shipped compatibility baseline).
 
 - **Public namespace:** everything a consumer needs is in the single root namespace
   **`Hermes.Messaging`** — an application typically needs only `using Hermes.Messaging;`. There are
@@ -97,12 +97,15 @@ in either file fails the build with **RS0016**; any entry present in a file but 
 assembly fails with **RS0017**. Nullability (`RS0037`/`RS0041`), duplicates (`RS0025`), and ordering
 (`RS0024`) are also enforced as errors (see `.editorconfig`).
 
-### Current baseline state (0.4.2-alpha)
-No release tracked by the analyzer has shipped yet (the analyzer was introduced in `0.4.1-alpha`,
-which was not published to NuGet; the only Git tag is `v0.2.0-alpha`, predating the analyzer). Per
-the conventional "first release pending" model, the **entire current public API lives in
-`PublicAPI.Unshipped.txt`** and `PublicAPI.Shipped.txt` contains only the `#nullable enable` header.
-Nothing is pretended to be historically shipped.
+### Current baseline state (0.5.0-beta)
+The `0.5.0-beta` freeze established the first analyzer-managed compatibility baseline: the **entire
+current public API is now in `PublicAPI.Shipped.txt`** and `PublicAPI.Unshipped.txt` contains only the
+`#nullable enable` header. `Shipped.txt` is the beta compatibility floor.
+
+Baseline provenance is the repository's intentional freeze process, not package-publication history:
+the repository has no GitHub Releases and the only pre-existing Git tag is `v0.2.0-alpha`. NuGet.org
+publication status of intermediate alpha builds is **not** used as the compatibility-baseline source
+for this repository.
 
 ### Adding or changing a public API (maintainer steps)
 1. Make the code change.
@@ -115,10 +118,13 @@ Nothing is pretended to be historically shipped.
 4. Review the diff to `PublicAPI.Unshipped.txt` in code review — this is the intentional-change gate.
 5. Keep the `#nullable enable` header at the top of each file.
 
-### Cutting a release
-When a version is released, move every line from `PublicAPI.Unshipped.txt` into
-`PublicAPI.Shipped.txt` (applying any `*REMOVED*` deletions), then reset `PublicAPI.Unshipped.txt` to
-just `#nullable enable`. From then on, `Shipped.txt` is the compatibility floor for that release line.
+### Cutting a release (post-beta workflow)
+The existing beta API is in `Shipped.txt`. A new public **addition** goes to `Unshipped.txt`; a
+**removal/change** is recorded in `Unshipped.txt` using the analyzer's conventions (`*REMOVED*`
+prefix for removals — do not just delete). When the next version is released, reconcile every line
+from `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt` (applying `*REMOVED*` deletions), then
+reset `PublicAPI.Unshipped.txt` to just `#nullable enable`. `Shipped.txt` remains the compatibility
+floor for the release line.
 
 > Do not weaken RS0016/RS0017 (or set them below `error`) to make a change compile. The whole point
 > is that public-surface drift is a deliberate, reviewed act.
@@ -131,5 +137,6 @@ The full type-by-type KEEP/INTERNALIZE rationale from the `0.4.0-alpha` internal
 made the implementation graph `internal`) is preserved in `CHANGELOG.md` under the `0.4.0-alpha`
 entry. Subsequent shape changes are recorded under `0.4.1-alpha` (single-namespace migration;
 removal of `SubscribeAsync<T>`, `AddDeadLetterQueue<T>`, and the obsolete `MaxRetryAttempts`) and
-`0.4.2-alpha` (baseline-hygiene: Shipped/Unshipped correction, CI action bump). This document is kept
-as the current-state reference; the CHANGELOG is the historical record.
+`0.4.2-alpha` (baseline-hygiene: Shipped/Unshipped correction, CI action bump), and `0.5.0-beta`
+(public API freeze: current API promoted to `Shipped.txt`; attribution resolved to Andrea Prestia).
+This document is kept as the current-state reference; the CHANGELOG is the historical record.
