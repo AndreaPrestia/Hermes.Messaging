@@ -18,13 +18,15 @@ public class PersistentMessageStoreTests : IDisposable
     [Fact]
     public void Persist_CreatesNewMessage_WithPendingStatus()
     {
+        var messageId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var correlationId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), correlationId);
+        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), correlationId, messageId);
 
         _store.Persist(message);
 
-        var persisted = _store.GetByCorrelationId(correlationId);
+        var persisted = _store.GetByMessageId(messageId);
         Assert.NotNull(persisted);
+        Assert.Equal(messageId, persisted.MessageId);
         Assert.Equal(correlationId, persisted.CorrelationId);
         Assert.Equal("test-path", persisted.Path);
         Assert.Equal("data", persisted.Body.Value);
@@ -36,13 +38,13 @@ public class PersistentMessageStoreTests : IDisposable
     [Fact]
     public void UpdateStatus_ChangesMessageStatus()
     {
-        var correlationId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), correlationId);
+        var messageId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
+        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), Guid.CreateVersion7(DateTimeOffset.UtcNow), messageId);
         _store.Persist(message);
 
-        _store.UpdateStatus(correlationId, MessageStatus.Completed);
+        _store.UpdateStatus(messageId, MessageStatus.Completed);
 
-        var persisted = _store.GetByCorrelationId(correlationId);
+        var persisted = _store.GetByMessageId(messageId);
         Assert.NotNull(persisted);
         Assert.Equal(MessageStatus.Completed, persisted.Status);
         Assert.Null(persisted.LastError);
@@ -51,13 +53,13 @@ public class PersistentMessageStoreTests : IDisposable
     [Fact]
     public void UpdateStatus_WithError_StoresErrorMessage()
     {
-        var correlationId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), correlationId);
+        var messageId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
+        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), Guid.CreateVersion7(DateTimeOffset.UtcNow), messageId);
         _store.Persist(message);
 
-        _store.UpdateStatus(correlationId, MessageStatus.Failed, "Connection timeout");
+        _store.UpdateStatus(messageId, MessageStatus.Failed, "Connection timeout");
 
-        var persisted = _store.GetByCorrelationId(correlationId);
+        var persisted = _store.GetByMessageId(messageId);
         Assert.NotNull(persisted);
         Assert.Equal(MessageStatus.Failed, persisted.Status);
         Assert.Equal("Connection timeout", persisted.LastError);
@@ -66,14 +68,14 @@ public class PersistentMessageStoreTests : IDisposable
     [Fact]
     public void IncrementAttempt_IncreasesAttemptCount()
     {
-        var correlationId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), correlationId);
+        var messageId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
+        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), Guid.CreateVersion7(DateTimeOffset.UtcNow), messageId);
         _store.Persist(message);
 
-        _store.IncrementAttempt(correlationId);
-        _store.IncrementAttempt(correlationId);
+        _store.IncrementAttempt(messageId);
+        _store.IncrementAttempt(messageId);
 
-        var persisted = _store.GetByCorrelationId(correlationId);
+        var persisted = _store.GetByMessageId(messageId);
         Assert.NotNull(persisted);
         Assert.Equal(2, persisted.AttemptCount);
     }
@@ -85,37 +87,37 @@ public class PersistentMessageStoreTests : IDisposable
         var pending2 = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var completed = Guid.CreateVersion7(DateTimeOffset.UtcNow);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), pending1));
-        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), pending2));
-        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), completed));
+        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), Guid.CreateVersion7(DateTimeOffset.UtcNow), pending1));
+        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), Guid.CreateVersion7(DateTimeOffset.UtcNow), pending2));
+        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), Guid.CreateVersion7(DateTimeOffset.UtcNow), completed));
         _store.UpdateStatus(completed, MessageStatus.Completed);
 
         var pending = _store.GetPendingMessages().ToList();
 
         Assert.Equal(2, pending.Count);
-        Assert.Contains(pending, p => p.CorrelationId == pending1);
-        Assert.Contains(pending, p => p.CorrelationId == pending2);
-        Assert.DoesNotContain(pending, p => p.CorrelationId == completed);
+        Assert.Contains(pending, p => p.MessageId == pending1);
+        Assert.Contains(pending, p => p.MessageId == pending2);
+        Assert.DoesNotContain(pending, p => p.MessageId == completed);
     }
 
     [Fact]
     public void GetPendingMessages_OrdersByCreatedAt()
     {
         var first = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), first));
+        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), Guid.CreateVersion7(DateTimeOffset.UtcNow), first));
         Thread.Sleep(100);
         var second = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), second));
+        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), Guid.CreateVersion7(DateTimeOffset.UtcNow), second));
         Thread.Sleep(100);
         var third = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), third));
+        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), Guid.CreateVersion7(DateTimeOffset.UtcNow), third));
 
         var pending = _store.GetPendingMessages().ToList();
 
         Assert.Equal(3, pending.Count);
-        Assert.Equal(first, pending[0].CorrelationId);
-        Assert.Equal(second, pending[1].CorrelationId);
-        Assert.Equal(third, pending[2].CorrelationId);
+        Assert.Equal(first, pending[0].MessageId);
+        Assert.Equal(second, pending[1].MessageId);
+        Assert.Equal(third, pending[2].MessageId);
     }
 
     [Fact]
@@ -126,26 +128,26 @@ public class PersistentMessageStoreTests : IDisposable
         var oldDeadLettered = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var oldPending = Guid.CreateVersion7(DateTimeOffset.UtcNow);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), recent));
+        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), Guid.CreateVersion7(DateTimeOffset.UtcNow), recent));
         _store.UpdateStatus(recent, MessageStatus.Completed);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), oldCompleted));
+        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), Guid.CreateVersion7(DateTimeOffset.UtcNow), oldCompleted));
         _store.UpdateStatus(oldCompleted, MessageStatus.Completed);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), oldDeadLettered));
+        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), Guid.CreateVersion7(DateTimeOffset.UtcNow), oldDeadLettered));
         _store.UpdateStatus(oldDeadLettered, MessageStatus.DeadLettered);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path4", new TestMessage("data4"), oldPending));
+        _store.Persist(new ChannelMessage<TestMessage>("path4", new TestMessage("data4"), Guid.CreateVersion7(DateTimeOffset.UtcNow), oldPending));
 
         Thread.Sleep(1100);
 
         var deletedCount = _store.CleanupOldMessages();
 
         Assert.Equal(3, deletedCount);
-        Assert.Null(_store.GetByCorrelationId(recent));
-        Assert.Null(_store.GetByCorrelationId(oldCompleted));
-        Assert.Null(_store.GetByCorrelationId(oldDeadLettered));
-        Assert.NotNull(_store.GetByCorrelationId(oldPending));
+        Assert.Null(_store.GetByMessageId(recent));
+        Assert.Null(_store.GetByMessageId(oldCompleted));
+        Assert.Null(_store.GetByMessageId(oldDeadLettered));
+        Assert.NotNull(_store.GetByMessageId(oldPending));
     }
 
     [Fact]
@@ -157,13 +159,13 @@ public class PersistentMessageStoreTests : IDisposable
         var failed = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var deadLettered = Guid.CreateVersion7(DateTimeOffset.UtcNow);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), pending1));
-        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), pending2));
-        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), completed));
+        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), Guid.CreateVersion7(DateTimeOffset.UtcNow), pending1));
+        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), Guid.CreateVersion7(DateTimeOffset.UtcNow), pending2));
+        _store.Persist(new ChannelMessage<TestMessage>("path3", new TestMessage("data3"), Guid.CreateVersion7(DateTimeOffset.UtcNow), completed));
         _store.UpdateStatus(completed, MessageStatus.Completed);
-        _store.Persist(new ChannelMessage<TestMessage>("path4", new TestMessage("data4"), failed));
+        _store.Persist(new ChannelMessage<TestMessage>("path4", new TestMessage("data4"), Guid.CreateVersion7(DateTimeOffset.UtcNow), failed));
         _store.UpdateStatus(failed, MessageStatus.Failed);
-        _store.Persist(new ChannelMessage<TestMessage>("path5", new TestMessage("data5"), deadLettered));
+        _store.Persist(new ChannelMessage<TestMessage>("path5", new TestMessage("data5"), Guid.CreateVersion7(DateTimeOffset.UtcNow), deadLettered));
         _store.UpdateStatus(deadLettered, MessageStatus.DeadLettered);
 
         var stats = _store.GetStats();
@@ -176,26 +178,26 @@ public class PersistentMessageStoreTests : IDisposable
     }
 
     [Fact]
-    public void GetByCorrelationId_NonExistent_ReturnsNull()
+    public void GetByMessageId_NonExistent_ReturnsNull()
     {
         var nonExistent = Guid.CreateVersion7(DateTimeOffset.UtcNow);
 
-        var result = _store.GetByCorrelationId(nonExistent);
+        var result = _store.GetByMessageId(nonExistent);
 
         Assert.Null(result);
     }
 
     [Fact]
-    public void Persist_MultipleMessages_WithUniqueCorrelationIds()
+    public void Persist_MultipleMessages_WithUniqueMessageIds()
     {
         var id1 = Guid.CreateVersion7(DateTimeOffset.UtcNow);
         var id2 = Guid.CreateVersion7(DateTimeOffset.UtcNow);
 
-        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), id1));
-        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), id2));
+        _store.Persist(new ChannelMessage<TestMessage>("path1", new TestMessage("data1"), Guid.CreateVersion7(DateTimeOffset.UtcNow), id1));
+        _store.Persist(new ChannelMessage<TestMessage>("path2", new TestMessage("data2"), Guid.CreateVersion7(DateTimeOffset.UtcNow), id2));
 
-        Assert.NotNull(_store.GetByCorrelationId(id1));
-        Assert.NotNull(_store.GetByCorrelationId(id2));
+        Assert.NotNull(_store.GetByMessageId(id1));
+        Assert.NotNull(_store.GetByMessageId(id2));
     }
 
     [Fact]
@@ -221,11 +223,11 @@ public class PersistentMessageStoreTests : IDisposable
     [Fact]
     public void Constructor_CreatesDatabase_WithCollectionAndIndexes()
     {
-        var correlationId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
-        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), correlationId);
+        var messageId = Guid.CreateVersion7(DateTimeOffset.UtcNow);
+        var message = new ChannelMessage<TestMessage>("test-path", new TestMessage("data"), Guid.CreateVersion7(DateTimeOffset.UtcNow), messageId);
 
         _store.Persist(message);
-        var retrieved = _store.GetByCorrelationId(correlationId);
+        var retrieved = _store.GetByMessageId(messageId);
 
         Assert.NotNull(retrieved);
     }

@@ -124,6 +124,10 @@ public static class ChannelSubscriptionExtensions
             return new PersistentMessageStore<T>(dbPath, completedRetention: TimeSpan.FromDays(7));
         });
 
+        // Expose the durable store through the storage-agnostic abstraction so the
+        // publisher can persist-before-signal without referencing the concrete type.
+        services.TryAddSingleton<IMessageStore<T>>(sp => sp.GetRequiredService<PersistentMessageStore<T>>());
+
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PersistentChannelRouterSubscriber<T>>());
     }
 }

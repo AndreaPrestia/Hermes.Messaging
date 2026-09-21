@@ -33,12 +33,19 @@ public enum MessageStatus
 public sealed class PersistedMessage<T>
 {
     /// <summary>
-    /// Unique identifier for the persisted message.
+    /// Unique identifier for the persisted message. This is the durable primary key
+    /// and is the same value as <see cref="MessageId"/>.
     /// </summary>
     public Guid Id { get; set; }
-    
+
     /// <summary>
-    /// Correlation ID from the original channel message.
+    /// Unique technical identity of the message. Used as the durable unique key.
+    /// </summary>
+    public Guid MessageId { get; set; }
+
+    /// <summary>
+    /// Logical correlation ID from the original channel message.
+    /// This value is NOT unique — multiple messages may share it.
     /// </summary>
     public Guid CorrelationId { get; set; }
     

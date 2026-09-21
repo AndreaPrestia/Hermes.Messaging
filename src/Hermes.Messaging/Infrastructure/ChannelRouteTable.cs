@@ -28,6 +28,16 @@ public sealed class ChannelRouteTable<T>
         }
     }
 
+    /// <summary>
+    /// Returns true if a handler is registered for the given route (case-insensitive).
+    /// Used to validate a route before durable acceptance.
+    /// </summary>
+    public bool HasRoute(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return _routes.ContainsKey(path);
+    }
+
     public Task DispatchAsync(string path, T message, IServiceProvider services, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(services);

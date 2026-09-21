@@ -60,8 +60,10 @@ public class InMemoryMessageBusTests : IDisposable
     }
 
     [Fact]
-    public async Task PublishAsync_WithUnmappedRoute_DoesNotInvokeHandler()
+    public async Task PublishAsync_WithUnmappedRoute_IsRejected()
     {
+        // Durable semantics (SDD 03/13): an unknown route is rejected BEFORE persistence,
+        // rather than silently dropped. This is an intentional Phase 1 breaking change.
         var received = new TaskCompletionSource<TestMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var host = Host.CreateDefaultBuilder()
@@ -83,8 +85,11 @@ public class InMemoryMessageBusTests : IDisposable
             await host.StartAsync();
 
             var bus = host.Services.GetRequiredService<IMessageBus>();
-            await bus.PublishAsync("tests/unmapped", new TestMessage("ignored"));
 
+            await Assert.ThrowsAsync<RouteNotFoundException>(async () =>
+                await bus.PublishAsync("tests/unmapped", new TestMessage("ignored")));
+
+            // The mapped handler must never be invoked for the rejected publish.
             var completed = await Task.WhenAny(received.Task, Task.Delay(TimeSpan.FromMilliseconds(500)));
             Assert.NotSame(received.Task, completed);
         }

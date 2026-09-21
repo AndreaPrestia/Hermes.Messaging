@@ -133,35 +133,36 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
 
         ChannelMetrics.RecordDequeued(typeof(T), envelope.Path);
 
-        // Persist message BEFORE processing
-        _messageStore.Persist(envelope);
+        // The publisher already durably persisted this message as Pending before signalling
+        // the channel (persist-before-signal). The subscriber must NOT insert a duplicate
+        // durable record — it only transitions the existing record's status.
 
         try
         {
             await DispatchWithRetryAsync(envelope, scope.ServiceProvider, stoppingToken).ConfigureAwait(false);
 
             // Mark as completed
-            _messageStore.UpdateStatus(envelope.CorrelationId, MessageStatus.Completed);
+            _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.Completed);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Message was persisted as Pending before processing started.
-            // It will be replayed on next startup via ReplayPendingMessagesAsync.
-            _logger?.LogDebug("Processing cancelled during shutdown for CorrelationId: {CorrelationId} — will replay on next startup", envelope.CorrelationId);
+            // Message remains persisted as Pending; it will be replayed on next startup
+            // via ReplayPendingMessagesAsync.
+            _logger?.LogDebug("Processing cancelled during shutdown for MessageId: {MessageId} — will replay on next startup", envelope.MessageId);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Message failed after all retries for path '{Path}', CorrelationId: {CorrelationId} - moving to dead letter queue", envelope.Path, envelope.CorrelationId);
+            _logger?.LogError(ex, "Message failed after all retries for path '{Path}', MessageId: {MessageId} - moving to dead letter queue", envelope.Path, envelope.MessageId);
 
             // Move to dead letter queue
             if (!_deadLetterQueue.TryEnqueue(envelope.Path, envelope.Body, ex, _maxRetryAttempts, envelope.CorrelationId))
             {
-                _logger?.LogCritical("Dead letter queue is full — message PERMANENTLY LOST for path '{Path}', CorrelationId: {CorrelationId}", envelope.Path, envelope.CorrelationId);
+                _logger?.LogCritical("Dead letter queue is full — message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", envelope.Path, envelope.MessageId);
                 ChannelMetrics.RecordDropped(typeof(T), envelope.Path);
             }
 
             // Mark as dead lettered
-            _messageStore.UpdateStatus(envelope.CorrelationId, MessageStatus.DeadLettered, ex.Message);
+            _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.DeadLettered, ex.Message);
         }
     }
 
@@ -180,34 +181,34 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
         {
             try
             {
-                var envelope = new ChannelMessage<T>(persisted.Path, persisted.Body, persisted.CorrelationId);
-                
+                var envelope = new ChannelMessage<T>(persisted.Path, persisted.Body, persisted.CorrelationId, persisted.MessageId);
+
                 using var scope = _scopeFactory.CreateScope();
-                
-                _messageStore.IncrementAttempt(persisted.CorrelationId);
-                
+
+                _messageStore.IncrementAttempt(persisted.MessageId);
+
                 await DispatchWithRetryAsync(envelope, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
-                
-                _messageStore.UpdateStatus(persisted.CorrelationId, MessageStatus.Completed);
-                
-                _logger?.LogInformation("Successfully replayed message with CorrelationId: {CorrelationId}", persisted.CorrelationId);
+
+                _messageStore.UpdateStatus(persisted.MessageId, MessageStatus.Completed);
+
+                _logger?.LogInformation("Successfully replayed message with MessageId: {MessageId}", persisted.MessageId);
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Failed to replay message with CorrelationId: {CorrelationId}", persisted.CorrelationId);
-                
+                _logger?.LogError(ex, "Failed to replay message with MessageId: {MessageId}", persisted.MessageId);
+
                 if (persisted.AttemptCount >= _maxRetryAttempts)
                 {
                     if (!_deadLetterQueue.TryEnqueue(persisted.Path, persisted.Body, ex, persisted.AttemptCount, persisted.CorrelationId))
                     {
-                        _logger?.LogCritical("Dead letter queue is full — replayed message PERMANENTLY LOST for path '{Path}', CorrelationId: {CorrelationId}", persisted.Path, persisted.CorrelationId);
+                        _logger?.LogCritical("Dead letter queue is full — replayed message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", persisted.Path, persisted.MessageId);
                         ChannelMetrics.RecordDropped(typeof(T), persisted.Path);
                     }
-                    _messageStore.UpdateStatus(persisted.CorrelationId, MessageStatus.DeadLettered, ex.Message);
+                    _messageStore.UpdateStatus(persisted.MessageId, MessageStatus.DeadLettered, ex.Message);
                 }
                 else
                 {
-                    _messageStore.UpdateStatus(persisted.CorrelationId, MessageStatus.Failed, ex.Message);
+                    _messageStore.UpdateStatus(persisted.MessageId, MessageStatus.Failed, ex.Message);
                 }
             }
         }
@@ -343,12 +344,12 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             ChannelMetrics.RecordDequeued(typeof(T), envelope.Path);
 
-            _messageStore.Persist(envelope);
+            // Already durably persisted by the publisher; do not insert a duplicate record.
 
             try
             {
                 await DispatchWithRetryAsync(envelope, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
-                _messageStore.UpdateStatus(envelope.CorrelationId, MessageStatus.Completed);
+                _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.Completed);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -356,13 +357,13 @@ public sealed class PersistentChannelRouterSubscriber<T> : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error draining message for path '{Path}', CorrelationId: {CorrelationId} - moving to dead letter queue", envelope.Path, envelope.CorrelationId);
+                _logger?.LogError(ex, "Error draining message for path '{Path}', MessageId: {MessageId} - moving to dead letter queue", envelope.Path, envelope.MessageId);
                 if (!_deadLetterQueue.TryEnqueue(envelope.Path, envelope.Body, ex, _maxRetryAttempts, envelope.CorrelationId))
                 {
-                    _logger?.LogCritical("Dead letter queue is full — drained message PERMANENTLY LOST for path '{Path}', CorrelationId: {CorrelationId}", envelope.Path, envelope.CorrelationId);
+                    _logger?.LogCritical("Dead letter queue is full — drained message PERMANENTLY LOST for path '{Path}', MessageId: {MessageId}", envelope.Path, envelope.MessageId);
                     ChannelMetrics.RecordDropped(typeof(T), envelope.Path);
                 }
-                _messageStore.UpdateStatus(envelope.CorrelationId, MessageStatus.DeadLettered, ex.Message);
+                _messageStore.UpdateStatus(envelope.MessageId, MessageStatus.DeadLettered, ex.Message);
             }
         }
     }
