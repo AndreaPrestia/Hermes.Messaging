@@ -4,6 +4,8 @@ namespace Hermes.Messaging.Infrastructure;
 
 /// <summary>
 /// Ensures a route gets registered during dependency injection resolution.
+/// DI-time wiring — not part of the intended public consumer surface
+/// (see docs/api/public-api-review.md: INTERNALIZE-BEFORE-BETA).
 /// </summary>
 /// <typeparam name="T">Message payload type.</typeparam>
 public sealed class ChannelRouteRegistration<T>

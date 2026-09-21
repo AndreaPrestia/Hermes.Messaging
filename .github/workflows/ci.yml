@@ -25,9 +25,20 @@ jobs:
       # Build the whole solution in Release. This compiles every project, including the
       # crash harness (Hermes.Messaging.CrashHarness), which CrashRecoveryTests invokes as a
       # child process. Because --no-build is used for the test step, the harness must already
-      # be built here — the solution build guarantees that.
+      # be built here — the solution build guarantees that. The benchmark project is part of
+      # the solution and is compiled here too, but benchmarks are NOT executed in CI.
       - name: Build
         run: dotnet build -c Release --no-restore
 
       - name: Test
         run: dotnet test -c Release --no-build --verbosity normal
+
+      # Verify the NuGet package can be produced.
+      - name: Pack
+        run: dotnet pack src/Hermes.Messaging/Hermes.Messaging.csproj -c Release -o artifacts
+
+      # Restore + run the package smoke test against the freshly-packed local package. This proves
+      # the shipped public API is sufficient for a real consumer (project-reference tests can hide
+      # accidentally-unexposed APIs). The smoke test project is intentionally outside the solution.
+      - name: Package smoke test
+        run: dotnet run -c Release --project tests/Hermes.Messaging.PackageSmokeTest/Hermes.Messaging.PackageSmokeTest.csproj -p:HermesPackageVersion=0.3.0-alpha

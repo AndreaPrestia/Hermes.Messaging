@@ -53,3 +53,8 @@ msbuild*.wrn
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
 TestResult.xml
+
+# Hermes: local package output and benchmark artifacts
+artifacts/
+BenchmarkDotNet.Artifacts/
+

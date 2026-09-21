@@ -7,6 +7,8 @@ namespace Hermes.Messaging.Infrastructure;
 /// Registry of durable stores that publishes gauge measurements reflecting durable state
 /// (pending / processing / retry-scheduled / dead-letter depth) per message type.
 /// Registered as a singleton; each store registers a stats provider at construction.
+/// Internal telemetry helper — not part of the intended public consumer surface
+/// (see docs/api/public-api-review.md: INTERNALIZE-BEFORE-BETA).
 /// </summary>
 public sealed class HermesStoreMetrics : IDisposable
 {

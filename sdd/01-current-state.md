@@ -1,5 +1,12 @@
 # 01 — Current State
 
+> **0.3.0-alpha maturity pass.** Added a BenchmarkDotNet project, a benchmark baseline, a public-API
+> review, and a storage-versioning ADR. Package hardened (XML docs, SDK SourceLink, CI `pack` +
+> package smoke test). A fail-fast `StoreSchemaMismatchException` guards against opening a store
+> written by a newer schema. Benchmarks found no correctness or clear performance defect, so the
+> messaging architecture is unchanged. Implementation-type internalization is deferred to a
+> coordinated pre-beta breaking change.
+>
 > **Bounded reconciliation (HERMES-007 implemented).** Reconciliation and startup seeding now query
 > only a bounded number of due `MessageId`s (`GetDueMessageIds(now, limit)`, limit enforced at the
 > query level, IDs only) sized to the available wake-up capacity, instead of materializing the whole

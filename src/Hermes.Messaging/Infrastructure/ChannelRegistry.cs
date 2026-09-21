@@ -7,7 +7,7 @@ namespace Hermes.Messaging.Infrastructure;
 
 /// <summary>
 /// Instance-based channel registry. Registered as a singleton in DI.
-/// Each channel is keyed by message type <typeparamref name="T"/>.
+/// Each channel is keyed by its message type.
 /// </summary>
 public sealed class ChannelRegistry
 {

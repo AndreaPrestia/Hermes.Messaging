@@ -134,3 +134,25 @@ public static class PersistedMessageSchema
     /// </summary>
     public const int CurrentVersion = 1;
 }
+
+/// <summary>
+/// Thrown at store-open time when a durable store contains records written by a NEWER Hermes
+/// schema version than this build supports. Hermes fails fast instead of silently mishandling or
+/// orphaning the backlog. See docs/architecture/adr-storage-versioning.md.
+/// </summary>
+public sealed class StoreSchemaMismatchException : InvalidOperationException
+{
+    public StoreSchemaMismatchException(string databasePath, int foundVersion, int supportedVersion)
+        : base($"Durable store '{databasePath}' was written by a newer Hermes schema (v{foundVersion}) " +
+               $"than this build supports (v{supportedVersion}). Upgrade Hermes, or run an explicit " +
+               $"migration. Hermes refuses to open it to avoid silently mishandling the durable backlog.")
+    {
+        DatabasePath = databasePath;
+        FoundVersion = foundVersion;
+        SupportedVersion = supportedVersion;
+    }
+
+    public string DatabasePath { get; }
+    public int FoundVersion { get; }
+    public int SupportedVersion { get; }
+}

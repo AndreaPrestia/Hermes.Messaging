@@ -5,6 +5,45 @@ changes are acceptable when required for correctness and are called out explicit
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0-alpha] — 2026-09-21
+
+Maturity / beta-preparation pass. No messaging-architecture changes: benchmarks found no
+correctness or well-understood performance defect, so the durable-store-as-source-of-truth design
+is unchanged.
+
+### Added
+- **Benchmark project** `benchmarks/Hermes.Messaging.Benchmarks` (BenchmarkDotNet): durable publish
+  (100 B / 1 KB / 10 KB), end-to-end processing (MaxConcurrency 1/4/16), message-type scaling
+  (1/10/50/100), and a long-running backlog-recovery benchmark plus a fast single-shot backlog probe.
+- **`docs/performance/benchmark-baseline.md`** — baseline results, environment, and honest
+  observations (measured facts vs interpretation).
+- **`docs/api/public-api-review.md`** — full public-API classification (KEEP / OBSOLETE /
+  INTERNALIZE-BEFORE-BETA / NEEDS-DESIGN).
+- **`docs/architecture/adr-storage-versioning.md`** — storage identity + versioning ADR.
+- **Fail-fast store schema guard:** opening a durable store written by a newer schema than the
+  running build throws `StoreSchemaMismatchException` (never silently orphans a backlog).
+- **Package smoke test** `tests/Hermes.Messaging.PackageSmokeTest` — consumes the packed NuGet and
+  exercises the public consumer surface; wired into CI after `dotnet pack`.
+
+### Changed
+- **Package hardening:** ship XML documentation, `EmbedUntrackedSources`, and
+  `ContinuousIntegrationBuild` in CI. SourceLink is provided by the .NET 10 SDK (no external
+  `Microsoft.SourceLink.GitHub` package — avoids the transitively-vulnerable
+  `Microsoft.Build.Tasks.Git`, NU1902).
+- **CI** now also runs `dotnet pack` and the package smoke test.
+- Version bumped to `0.3.0-alpha`.
+
+### Deferred (documented, not implemented)
+- Internalizing implementation types (`PersistentMessageStore<T>`, `ChannelRegistry`,
+  `PersistentChannelRouterSubscriber<T>`, etc.) — they are coupled to the public subscriber
+  constructor and must be internalized together as one coordinated breaking change before beta.
+- Stable logical message-type identity (decouple from CLR names) and any record-shape migration.
+
+### Notes
+- **License/authors metadata discrepancy** surfaced: `LICENSE` copyright holder is `Kakama`, while
+  the NuGet `<Authors>` is `Andrea Prestia`. Both declare MIT. Ownership attribution was **not**
+  changed — flagged for the maintainer to reconcile.
+
 ## [0.2.0-alpha] — 2026-09-21
 
 Durability and correctness hardening across HERMES-001 … HERMES-007.

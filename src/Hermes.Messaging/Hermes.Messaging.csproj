@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>Hermes.Messaging</PackageId>
-    <Version>0.2.0-alpha</Version>
+    <Version>0.3.0-alpha</Version>
     <Authors>Andrea Prestia</Authors>
     <Description>In-process, single-process durable message bus for .NET built on System.Threading.Channels with LiteDB persistence. Publish-before-signal durability, a durable state machine with crash recovery, persistent retry with jittered backoff, a durable dead-letter queue, explicit runtime lifecycle, and OpenTelemetry-compatible metrics and tracing (Hermes.Messaging).</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -17,6 +17,13 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Deterministic>true</Deterministic>
+    <!-- Deterministic build in CI (GitHub Actions sets CI=true). -->
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- Ship XML docs so IntelliSense works for consumers. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Missing-XML-comment noise is not useful here; public API is documented pragmatically. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,5 +38,12 @@
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.5" />
   </ItemGroup>
+
+  <!--
+    SourceLink is built into the .NET 10 SDK; with PublishRepositoryUrl + ContinuousIntegrationBuild
+    + EmbedUntrackedSources set above, package builds embed repo/commit metadata without needing the
+    external Microsoft.SourceLink.GitHub package (which drags in a transitively-vulnerable
+    Microsoft.Build.Tasks.Git, NU1902).
+  -->
 
 </Project>

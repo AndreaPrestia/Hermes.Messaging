@@ -1,9 +1,13 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Hermes.Messaging.Benchmarks/Hermes.Messaging.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Hermes.Messaging/Hermes.Messaging.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Hermes.Messaging.CrashHarness/Hermes.Messaging.CrashHarness.csproj" />
+    <Project Path="tests/Hermes.Messaging.PackageSmokeTest/Hermes.Messaging.PackageSmokeTest.csproj" />
     <Project Path="tests/Hermes.Messaging.Tests/Hermes.Messaging.Tests.csproj" />
   </Folder>
 </Solution>

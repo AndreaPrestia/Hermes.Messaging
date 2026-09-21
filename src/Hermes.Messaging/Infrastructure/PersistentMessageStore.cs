@@ -36,6 +36,25 @@ public sealed class PersistentMessageStore<T> : IMessageStore<T>, IDisposable
         _messages.EnsureIndex(x => x.CorrelationId, unique: false);
         _messages.EnsureIndex(x => x.Status);
         _messages.EnsureIndex(x => x.CreatedAt);
+
+        // Fail fast rather than silently mishandle a store written by a NEWER Hermes schema.
+        // See docs/architecture/adr-storage-versioning.md. This is a minimal guard, not a
+        // migration engine: it never rewrites or discards records. Empty store => count 0 => skip.
+        if (_messages.Count() > 0)
+        {
+            var maxSchema = _messages.Query()
+                .OrderByDescending(x => x.SchemaVersion)
+                .Select(x => x.SchemaVersion)
+                .Limit(1)
+                .ToList()
+                .FirstOrDefault();
+
+            if (maxSchema > PersistedMessageSchema.CurrentVersion)
+            {
+                _db.Dispose();
+                throw new StoreSchemaMismatchException(databasePath, maxSchema, PersistedMessageSchema.CurrentVersion);
+            }
+        }
     }
 
     /// <summary>
